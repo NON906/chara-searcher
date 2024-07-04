@@ -1,0 +1,3 @@
+[submodule "CartoonSegmentation"]
+	path = CartoonSegmentation
+	url = https://github.com/CartoonSegmentation/CartoonSegmentation.git

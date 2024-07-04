@@ -1,3 +1,6 @@
 tqdm
 transformers
 sentence-transformers
+onnxruntime==1.17.1
+
+-r ./CartoonSegmentation/requirements.txt
