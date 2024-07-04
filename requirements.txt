@@ -1,0 +1,3 @@
+tqdm
+transformers
+sentence-transformers
