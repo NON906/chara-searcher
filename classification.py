@@ -19,6 +19,8 @@ def main():
         embedding_array.append(embedding)
     input_embedding = np.stack(embedding_array, 0)
 
+    input_embedding = normalize(input_embedding)
+
     kmeans_model = KMeans(n_clusters=2)
     kmeans_model.fit(input_embedding)
 
