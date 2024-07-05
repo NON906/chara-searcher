@@ -43,7 +43,7 @@ class AnimeInsSegSmooth(AnimeInsSeg):
             masks = masks.cpu().numpy()
         instances.masks = masks
 
-def main(mask_thres=0.6, instance_thres=0.1, padding_size=0.1):
+def main(mask_thres=0.6, instance_thres=0.3, padding_size=0.1):
     os.makedirs('src_images', exist_ok=True)
 
     refine_kwargs = {'refine_method': 'refinenet_isnet'}
@@ -61,6 +61,8 @@ def main(mask_thres=0.6, instance_thres=0.1, padding_size=0.1):
             output_type='numpy',
             pred_score_thr=instance_thres
         )
+        if instances.bboxes is None or instances.masks is None:
+            continue
         for ii, (xywh, mask) in enumerate(zip(instances.bboxes, instances.masks)):
             p = (mask.astype(np.float32) - mask_thres) / (1.0 - mask_thres)
             p = p.clip(0.0, 1.0)
@@ -73,19 +75,23 @@ def main(mask_thres=0.6, instance_thres=0.1, padding_size=0.1):
             dst = dst.astype(src.dtype)
 
             left_x = int(xywh[0] - padding_size * xywh[2])
+            right_x = int(xywh[2] + xywh[0] + padding_size * xywh[2])
+            if right_x < left_x:
+                 left_x, right_x = right_x, left_x
             if left_x < 0:
                 left_x = 0
-            right_x = int(xywh[2] + xywh[0] + padding_size * xywh[2])
-            if right_x > dst.shape[0]:
-                right_x = dst.shape[0]
+            if right_x > dst.shape[1]:
+                right_x = dst.shape[1]
             top_y = int(xywh[1] - padding_size * xywh[3])
+            bottom_y = int(xywh[3] + xywh[1] + padding_size * xywh[3])
+            if bottom_y < top_y:
+                top_y, bottom_y = bottom_y, top_y
             if top_y < 0:
                 top_y = 0
-            bottom_y = int(xywh[3] + xywh[1] + padding_size * xywh[3])
-            if bottom_y > dst.shape[1]:
-                bottom_y = dst.shape[1]
+            if bottom_y > dst.shape[0]:
+                bottom_y = dst.shape[0]
 
-            trim_dst = dst[left_x:right_x, top_y:bottom_y]
+            trim_dst = dst[top_y:bottom_y, left_x:right_x]
 
             if trim_dst.shape[0] > 0 and trim_dst.shape[1] > 0:
                 save_filename = 'src_images/' + os.path.splitext(filename)[0].replace('\\', '_').replace('/', '_') + '_' + str(ii) + '.png'
