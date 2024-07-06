@@ -1,3 +1,6 @@
 [submodule "CartoonSegmentation"]
 	path = CartoonSegmentation
 	url = https://github.com/CartoonSegmentation/CartoonSegmentation.git
+[submodule "wd14-tagger-standalone"]
+	path = wd14-tagger-standalone
+	url = https://github.com/corkborg/wd14-tagger-standalone.git

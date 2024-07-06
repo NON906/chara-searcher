@@ -1,6 +1,7 @@
 tqdm
 transformers
 sentence-transformers
-onnxruntime==1.17.1
+onnxruntime-gpu==1.17.1
 
 -r ./CartoonSegmentation/requirements.txt
+-r ./wd14-tagger-standalone/requirements.txt
