@@ -2,6 +2,7 @@ tqdm
 transformers
 sentence-transformers
 onnxruntime-gpu==1.17.1
+gradio==3.41.2
 
 -r ./CartoonSegmentation/requirements.txt
 -r ./wd14-tagger-standalone/requirements.txt
