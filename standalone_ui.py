@@ -21,7 +21,12 @@ def get_unique_dir(data_name):
         src_images_dir = src_images_dir_base + '_' + str(dir_loop)
     return src_images_dir
 
-def upload_dir_files(files, data_name):
+def get_target_datas_choices():
+    dir_path = os.path.join('outputs', 'image_search_datas')
+    target_datas_choices = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f, 'embedding.json'))]
+    return target_datas_choices
+
+def upload_dir_files(files, data_name, target_datas):
     if data_name is None or data_name == '':
         data_name = 'Untitled'
     src_images_dir = get_unique_dir(data_name)
@@ -30,18 +35,18 @@ def upload_dir_files(files, data_name):
     
     os.makedirs(src_images_dir, exist_ok=True)
 
-    print('Processing segmentation.')
+    print('* Processing segmentation.')
     segmentation_main(file_paths, src_images_dir)
 
-    print('Processing tagging.')
+    print('* Processing tagging.')
     tagging_main(src_images_dir)
 
-    print('Processing calc embedding.')
+    print('* Processing calc embedding.')
     calc_embedding_main(src_images_dir)
 
-    return ''
+    return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
 
-def upload_video_file(file, data_name, span=4.0, fps=-1.0):
+def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
     if type(file) == list:
         file = file[0]
     if data_name is None or data_name == '':
@@ -53,7 +58,7 @@ def upload_video_file(file, data_name, span=4.0, fps=-1.0):
     if fps > 0.0:
         span = 1.0 / str(fps)
 
-    print('Processing segmentation.')
+    print('* Processing segmentation.')
     container = av.open(file.name, options={'skip_frame': 'nokey'})
     stream = container.streams.video[0]
     next_time = 0.0
@@ -69,15 +74,17 @@ def upload_video_file(file, data_name, span=4.0, fps=-1.0):
             next_time += span
             frame_count += 1
 
-    print('Processing tagging.')
+    print('* Processing tagging.')
     tagging_main(src_images_dir)
 
-    print('Processing calc embedding.')
+    print('* Processing calc embedding.')
     calc_embedding_main(src_images_dir)
 
-    return ''
+    return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
 
 def main_ui():
+    target_datas_choices = get_target_datas_choices()
+
     with gr.Blocks() as block_interface:
         with gr.Row():
             gr.Markdown(value='## Load Datas')
@@ -87,10 +94,10 @@ def main_ui():
                 upload_dir_btn = gr.UploadButton(label='Upload Images Directory', file_count='directory')
                 upload_video_file_btn = gr.UploadButton(label='Upload Video Files')
             with gr.Column():
-                target_datas = gr.Dropdown(choices=[], value=[], label='Target Datas', multiselect=True)
+                target_datas = gr.Dropdown(choices=target_datas_choices, value=target_datas_choices, label='Target Datas', multiselect=True, interactive=True)
 
-        upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name], outputs=upload_data_name)
-        upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name], outputs=upload_data_name)
+        upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
+        upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
 
     return block_interface
 
