@@ -167,7 +167,7 @@ def search_image_sort(target_datas, image, threshold, positive_keywords, negativ
     sorted_similarities_index = np.argsort(similarities)
     sorted_similarities = np.sort(similarities)
 
-    return search_filter(threshold, positive_keywords, negative_keywords)
+    return search_filter(threshold, positive_keywords, negative_keywords), seg_image
 
 def main_ui():
     target_datas_choices = get_target_datas_choices()
@@ -199,7 +199,7 @@ def main_ui():
 
         search_image.upload(fn=search_image_sort,
             inputs=[target_datas, search_image, search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=search_result_gallery)
+            outputs=[search_result_gallery, search_image])
         search_threshold_slider.change(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
             outputs=search_result_gallery)
