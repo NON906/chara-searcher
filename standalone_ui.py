@@ -203,7 +203,7 @@ def export(images, dir_name, add_tags, exclude_tags):
     exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
 
     for loop in range(len(images)):
-        index = sorted_similarities_index[-loop]
+        index = sorted_similarities_index[-loop - 1]
         file_tags = embedding_file_datas[index][1].split(',')
         file_tags = [k.strip() for k in file_tags]
         file_tags = [k for k in file_tags if k != '']
