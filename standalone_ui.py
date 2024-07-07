@@ -127,6 +127,8 @@ def search_filter(threshold, positive_keywords, negative_keywords):
     negative_keywords = [k.strip() for k in negative_keywords]
     negative_keywords = [k for k in negative_keywords if k != '']
     ret = []
+    tags = {}
+    max_tags_count = 0
     for loop in range(sorted_similarities_index.shape[0] - 1, -1, -1):
         index = sorted_similarities_index[loop]
         similarity = sorted_similarities[loop]
@@ -143,8 +145,26 @@ def search_filter(threshold, positive_keywords, negative_keywords):
                 break
         if do_append:
             ret.append(embedding_file_datas[index][0])
-        
-    return ret
+            file_tags = embedding_file_datas[index][1].split(',')
+            file_tags = [k.strip() for k in file_tags]
+            file_tags = [k for k in file_tags if k != '']
+            for tag in file_tags:
+                if tag in tags:
+                    tags[tag] += 1
+                else:
+                    tags[tag] = 1
+                if tags[tag] > max_tags_count:
+                    max_tags_count = tags[tag]
+    
+    tags_count_list = [[] for _ in range(max_tags_count + 1)]
+    for tag, count in tags.items():
+        tags_count_list[count].append(tag + ' (' + str(count) + ')')
+    tags_list = []
+    tags_count_list = tags_count_list[::-1]
+    for tags_count_items in tags_count_list:
+        tags_list += tags_count_items
+
+    return ret, gr.update(choices=tags_list)
 
 def search_image_sort(target_datas, image, threshold, positive_keywords, negative_keywords):
     global img_model, embedding, sorted_similarities_index, sorted_similarities
@@ -167,7 +187,9 @@ def search_image_sort(target_datas, image, threshold, positive_keywords, negativ
     sorted_similarities_index = np.argsort(similarities)
     sorted_similarities = np.sort(similarities)
 
-    return search_filter(threshold, positive_keywords, negative_keywords), seg_image
+    result_images, tags_list = search_filter(threshold, positive_keywords, negative_keywords)
+
+    return result_images, seg_image, tags_list
 
 def main_ui():
     target_datas_choices = get_target_datas_choices()
@@ -189,26 +211,33 @@ def main_ui():
                 search_image = gr.Image(label='Search Image')
                 search_threshold_slider = gr.Slider(label='Search Image Threshold', value=90.0)
             with gr.Column():
-                search_positive_keywords = gr.Textbox(label='Search Keywords')
-                search_negative_keywords = gr.Textbox(label='Negative Keywords')
+                search_positive_keywords = gr.Textbox(label='Search Tags')
+                search_negative_keywords = gr.Textbox(label='Negative Tags')
         with gr.Row():
             search_result_gallery = gr.Gallery(label='Search Result', columns=10)
+        with gr.Row():
+            gr.Markdown(value='## Export')
+        with gr.Row():
+            with gr.Column():
+                export_add_tags = gr.Textbox(label='Additional Tags', value='white background, simple background', interactive=True)
+                export_exclude_tags = gr.Dropdown(choices=[], value=[], label='Exclude Tags', multiselect=True, interactive=True)
+                export_button = gr.Button(value='Export')
 
         upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
         upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
 
         search_image.upload(fn=search_image_sort,
             inputs=[target_datas, search_image, search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=[search_result_gallery, search_image])
+            outputs=[search_result_gallery, search_image, export_exclude_tags])
         search_threshold_slider.change(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=search_result_gallery)
+            outputs=[search_result_gallery, export_exclude_tags])
         search_positive_keywords.change(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=search_result_gallery)
+            outputs=[search_result_gallery, export_exclude_tags])
         search_negative_keywords.change(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=search_result_gallery)
+            outputs=[search_result_gallery, export_exclude_tags])
 
     return block_interface
 
