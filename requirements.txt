@@ -5,5 +5,11 @@ onnxruntime-gpu==1.17.1
 gradio==3.41.2
 av
 
+pandas
+huggingface-hub
+Pillow
+deepdanbooru
+numpy
+opencv-python
+
 -r ./CartoonSegmentation/requirements.txt
--r ./wd14-tagger-standalone/requirements.txt
