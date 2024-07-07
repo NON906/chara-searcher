@@ -11,6 +11,7 @@ from sentence_transformers import SentenceTransformer
 from PIL import Image
 import numpy as np
 import json
+import datetime
 
 from segmentation import segmentation_main, segmentation_single
 from tagging import tagging_main
@@ -191,8 +192,48 @@ def search_image_sort(target_datas, image, threshold, positive_keywords, negativ
 
     return result_images, seg_image, tags_list
 
+def export(images, dir_name, add_tags, exclude_tags):
+    global sorted_similarities_index, embedding_file_datas
+    os.makedirs(dir_name, exist_ok=True)
+
+    add_tags = add_tags.split(',')
+    add_tags = [k.strip() for k in add_tags]
+    add_tags = [k for k in add_tags if k != '']
+
+    exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
+
+    for loop in range(len(images)):
+        index = sorted_similarities_index[-loop]
+        file_tags = embedding_file_datas[index][1].split(',')
+        file_tags = [k.strip() for k in file_tags]
+        file_tags = [k for k in file_tags if k != '']
+        for tag in exclude_tags:
+            if tag in file_tags:
+                file_tags.remove(tag)
+        for tag in add_tags:
+            if tag in file_tags:
+                file_tags.remove(tag)
+        file_tags = add_tags + file_tags
+
+        target_file_base = os.path.join(dir_name, os.path.splitext(os.path.basename(embedding_file_datas[index][0]))[0])
+        ext = os.path.splitext(os.path.basename(embedding_file_datas[index][0]))[1]
+        target_file = target_file_base + ext
+        dir_loop = 0
+        while os.path.isfile(target_file):
+            dir_loop += 1
+            target_file = target_file_base + '_' + str(dir_loop) + ext
+
+        shutil.copy2(embedding_file_datas[index][0], target_file)
+        txt_path = os.path.splitext(target_file)[0] + '.txt'
+        with open(txt_path, 'w') as f:
+            f.write(', '.join(file_tags))
+        
+    print('* Finish export.')
+
 def main_ui():
     target_datas_choices = get_target_datas_choices()
+    dt_now = datetime.datetime.now()
+    save_dt = dt_now.strftime('%Y%m%d_%H%M%S')
 
     with gr.Blocks() as block_interface:
         with gr.Row():
@@ -219,6 +260,7 @@ def main_ui():
             gr.Markdown(value='## Export')
         with gr.Row():
             with gr.Column():
+                export_dir_name = gr.Textbox(label='Export Directory', value='outputs/export_train_datas/' + save_dt, interactive=True)
                 export_add_tags = gr.Textbox(label='Additional Tags', value='white background, simple background', interactive=True)
                 export_exclude_tags = gr.Dropdown(choices=[], value=[], label='Exclude Tags', multiselect=True, interactive=True)
                 export_button = gr.Button(value='Export')
@@ -238,6 +280,8 @@ def main_ui():
         search_negative_keywords.change(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
             outputs=[search_result_gallery, export_exclude_tags])
+
+        export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags])
 
     return block_interface
 
