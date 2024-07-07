@@ -45,7 +45,7 @@ class AnimeInsSegSmooth(AnimeInsSeg):
             masks = masks.cpu().numpy()
         instances.masks = masks
 
-def segmentation_single(filename, mask_thres=0.6, instance_thres=0.3, padding_size=0.1):
+def segmentation_single(img, mask_thres=0.6, instance_thres=0.3, padding_size=0.1):
     global net
 
     if net is None:
@@ -57,7 +57,6 @@ def segmentation_single(filename, mask_thres=0.6, instance_thres=0.3, padding_si
 
     ret = []
 
-    img = cv2.imread(filename, -1)
     src = img[:,:,0:3]
     instances: AnimeInstances = net.infer(
         src,
@@ -103,12 +102,16 @@ def segmentation_main(filenames, src_images_dir='src_images', mask_thres=0.6, in
     os.makedirs(src_images_dir, exist_ok=True)
 
     for filename in tqdm(filenames, total=len(filenames)):
-        trim_dsts = segmentation_single(filename, mask_thres, instance_thres, padding_size)
-        for ii, trim_dst in enumerate(trim_dsts):
-            if trim_dst.shape[0] > 0 and trim_dst.shape[1] > 0:
-                save_filename = os.path.join(src_images_dir, os.path.splitext('_'.join(filename.replace('\\', '/').split('/')[-2:]))[0] + '_' + str(ii) + '.png')
-                #print(save_filename)
-                cv2.imwrite(save_filename, trim_dst)
+        try:
+            img = cv2.imread(filename, -1)
+            trim_dsts = segmentation_single(img, mask_thres, instance_thres, padding_size)
+            for ii, trim_dst in enumerate(trim_dsts):
+                if trim_dst.shape[0] > 0 and trim_dst.shape[1] > 0:
+                    save_filename = os.path.join(src_images_dir, os.path.splitext('_'.join(filename.replace('\\', '/').split('/')[-2:]))[0] + '_' + str(ii) + '.png')
+                    #print(save_filename)
+                    cv2.imwrite(save_filename, trim_dst)
+        except:
+            pass
 
 if __name__ == '__main__':
     filenames = glob.glob('org_images/**/*.*', recursive=True)
