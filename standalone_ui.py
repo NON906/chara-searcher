@@ -7,10 +7,20 @@ import shutil
 import av
 from tqdm import tqdm
 import cv2
+from sentence_transformers import SentenceTransformer
+from PIL import Image
+import numpy as np
+import json
 
 from segmentation import segmentation_main, segmentation_single
 from tagging import tagging_main
 from calc_embedding import calc_embedding_main
+
+img_model = None
+loaded_target_datas = None
+embedding_file_datas = None
+sorted_similarities_index = None
+sorted_similarities = None
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -82,6 +92,83 @@ def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
 
     return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
 
+def load_target_datas(target_datas):
+    global img_model, embedding, embedding_file_datas, loaded_target_datas
+    if loaded_target_datas == target_datas:
+        return
+
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
+
+    embedding_array = []
+    embedding_file_datas = []
+
+    for target_data in target_datas:
+        print('* Load "' + target_data + '".')
+        dir_base = os.path.join('outputs', 'image_search_datas', target_data)
+        embedding_array.append(np.load(os.path.join(dir_base, 'embedding.npz'))['embedding'])
+        with open(os.path.join(dir_base, 'embedding.json'), 'r') as f:
+            add_embedding_files = json.load(f)['files']
+        for file in tqdm(add_embedding_files):
+            txt_path = os.path.join(dir_base, os.path.splitext(file)[0] + '.txt')
+            with open(txt_path, 'r') as f:
+                embedding_file_datas.append((os.path.join(dir_base, file), f.read()))
+    embedding = np.concatenate(embedding_array, 0)
+    loaded_target_datas = target_datas
+
+def search_filter(threshold, positive_keywords, negative_keywords):
+    global embedding_file_datas, sorted_similarities_index, sorted_similarities
+    if embedding_file_datas is None or sorted_similarities_index is None or sorted_similarities is None:
+        return []
+    positive_keywords = positive_keywords.split(',')
+    positive_keywords = [k.strip() for k in positive_keywords]
+    positive_keywords = [k for k in positive_keywords if k != '']
+    negative_keywords = negative_keywords.split(',')
+    negative_keywords = [k.strip() for k in negative_keywords]
+    negative_keywords = [k for k in negative_keywords if k != '']
+    ret = []
+    for loop in range(sorted_similarities_index.shape[0] - 1, -1, -1):
+        index = sorted_similarities_index[loop]
+        similarity = sorted_similarities[loop]
+        if similarity < threshold / 100.0:
+            break
+        do_append = True
+        for keyword in positive_keywords:
+            if not keyword in embedding_file_datas[index][1]:
+                do_append = False
+                break
+        for keyword in negative_keywords:
+            if keyword in embedding_file_datas[index][1]:
+                do_append = False
+                break
+        if do_append:
+            ret.append(embedding_file_datas[index][0])
+        
+    return ret
+
+def search_image_sort(target_datas, image, threshold, positive_keywords, negative_keywords):
+    global img_model, embedding, sorted_similarities_index, sorted_similarities
+    load_target_datas(target_datas)
+
+    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    seg_images = segmentation_single(image_bgr)
+    if len(seg_images) > 0:
+        seg_image = cv2.cvtColor(seg_images[0], cv2.COLOR_BGR2RGB)
+    else:
+        seg_image = image
+
+    pil_image = Image.fromarray(seg_image)
+    image_embedding = img_model.encode(pil_image)
+
+    similarities = img_model.similarity(embedding, image_embedding)
+    similarities = np.squeeze(similarities)
+
+    sorted_similarities_index = np.argsort(similarities)
+    sorted_similarities = np.sort(similarities)
+
+    return search_filter(threshold, positive_keywords, negative_keywords)
+
 def main_ui():
     target_datas_choices = get_target_datas_choices()
 
@@ -95,9 +182,33 @@ def main_ui():
                 upload_video_file_btn = gr.UploadButton(label='Upload Video Files')
             with gr.Column():
                 target_datas = gr.Dropdown(choices=target_datas_choices, value=target_datas_choices, label='Target Datas', multiselect=True, interactive=True)
+        with gr.Row():
+            gr.Markdown(value='## Search And Preview')
+        with gr.Row():
+            with gr.Column():
+                search_image = gr.Image(label='Search Image')
+                search_threshold_slider = gr.Slider(label='Search Image Threshold', value=90.0)
+            with gr.Column():
+                search_positive_keywords = gr.Textbox(label='Search Keywords')
+                search_negative_keywords = gr.Textbox(label='Negative Keywords')
+        with gr.Row():
+            search_result_gallery = gr.Gallery(label='Search Result', columns=10)
 
         upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
         upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
+
+        search_image.upload(fn=search_image_sort,
+            inputs=[target_datas, search_image, search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=search_result_gallery)
+        search_threshold_slider.change(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=search_result_gallery)
+        search_positive_keywords.change(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=search_result_gallery)
+        search_negative_keywords.change(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=search_result_gallery)
 
     return block_interface
 

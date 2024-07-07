@@ -98,6 +98,12 @@ def segmentation_single(img, mask_thres=0.6, instance_thres=0.3, padding_size=0.
 
     return ret
 
+def segmentation_unload_net():
+    global net
+    if net is not None:
+        del net
+        net = None
+
 def segmentation_main(filenames, src_images_dir='src_images', mask_thres=0.6, instance_thres=0.3, padding_size=0.1):
     os.makedirs(src_images_dir, exist_ok=True)
 
