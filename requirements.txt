@@ -1,7 +1,6 @@
 tqdm
 transformers
 sentence-transformers
-onnxruntime-gpu==1.17.1
 gradio==3.41.2
 av
 
@@ -12,4 +11,21 @@ deepdanbooru
 numpy
 opencv-python
 
--r ./CartoonSegmentation/requirements.txt
+einops
+imageio
+imgaug
+git+https://github.com/cocodataset/panopticapi.git
+pytorch-lightning
+albumentations==1.1.0
+huggingface_hub
+omegaconf
+diffusers
+accelerate
+matplotlib
+scipy
+basicsr
+numba
+imgaug
+moviepy
+flask
+h5py

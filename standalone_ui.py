@@ -34,6 +34,8 @@ def get_unique_dir(data_name):
 
 def get_target_datas_choices():
     dir_path = os.path.join('outputs', 'image_search_datas')
+    if not os.path.isdir(dir_path):
+        return []
     target_datas_choices = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f, 'embedding.json'))]
     return target_datas_choices
 

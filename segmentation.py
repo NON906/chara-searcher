@@ -10,8 +10,9 @@ from tqdm import tqdm
 import glob
 import torch
 
-sys.path.append('CartoonSegmentation')
+sys.path = [os.path.join(os.path.dirname(__file__), 'CartoonSegmentation'), ] + sys.path
 from animeinsseg import AnimeInsSeg, AnimeInstances, prepare_refine_batch
+sys.path = sys.path[1:]
 
 net = None
 
@@ -51,9 +52,10 @@ def segmentation_single(img, mask_thres=0.6, instance_thres=0.3, padding_size=0.
     if net is None:
         refine_kwargs = {'refine_method': 'refinenet_isnet'}
         ckpt = r'models/AnimeInstanceSegmentation/rtmdetl_e60.ckpt'
-        os.chdir('CartoonSegmentation')
+        default_current_dir = os.getcwd()
+        os.chdir(os.path.join(os.path.dirname(__file__), 'CartoonSegmentation'))
         net = AnimeInsSegSmooth(ckpt, refine_kwargs=refine_kwargs)
-        os.chdir('..')
+        os.chdir(default_current_dir)
 
     ret = []
 
