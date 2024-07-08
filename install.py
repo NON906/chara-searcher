@@ -56,20 +56,30 @@ elif platform == 'standalone':
     subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmcv>=2.0.0'])
     subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmdet'])
 
-    pip_list_str = subprocess.run([sys.executable, '-m', 'pip', 'list'], capture_output=True, text=True).stdout
-    pip_list_lines = pip_list_str.splitlines()
-    torch_lines = [item for item in pip_list_lines if item.startswith('torch')]
-    torch_version = None
-    if torch_lines and len(torch_lines) > 0:
-        torch_version = torch_lines[0].split()[-1]
-    if torch_version is not None and '+cu' in torch_version:
-        cuda_version = torch_version.split('+cu')[-1]
-        if cuda_version[:2] == '12':
+    conda_list_str = subprocess.run(['conda', 'list'], capture_output=True, text=True, shell=True).stdout
+    conda_list_lines = conda_list_str.splitlines()
+    cuda_lines = [item for item in conda_list_lines if item.startswith('pytorch-cuda')]
+    if cuda_lines and len(cuda_lines) > 0:
+        cuda_version = cuda_lines[0].split()[1]
+        if cuda_version[:3] == '12.':
             subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu==1.17.1', '--extra-index-url', 'https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/'])
         else:
             subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu==1.17.1'])
     else:
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime==1.17.3'])
+        pip_list_str = subprocess.run([sys.executable, '-m', 'pip', 'list'], capture_output=True, text=True).stdout
+        pip_list_lines = pip_list_str.splitlines()
+        torch_lines = [item for item in pip_list_lines if item.startswith('torch')]
+        torch_version = None
+        if torch_lines and len(torch_lines) > 0:
+            torch_version = torch_lines[0].split()[-1]
+        if torch_version is not None and '+cu' in torch_version:
+            cuda_version = torch_version.split('+cu')[-1]
+            if cuda_version[:2] == '12':
+                subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu==1.17.1', '--extra-index-url', 'https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/'])
+            else:
+                subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu==1.17.1'])
+        else:
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime==1.17.3'])
 
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 
