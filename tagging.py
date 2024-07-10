@@ -132,7 +132,12 @@ def tagging_main(dir='src_images', threshold=0.35):
         interrogator.use_cpu()
 
     root_path = Path(args.dir)
-    for image_path in tqdm(explore_image_files(root_path)):
+
+    total = 0
+    for image_path in explore_image_files(root_path):
+        total += 1
+
+    for image_path in tqdm(explore_image_files(root_path), total=total):
         caption_path = image_path.parent / f'{image_path.stem}{args.ext}'
 
         #print('processing:', image_path)
