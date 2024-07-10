@@ -9,12 +9,15 @@ import os
 import shutil
 import json
 from pathlib import Path
+from contextlib import redirect_stderr
 
 def calc_embedding(filenames, img_model):
     embedding_array = []
     for filename in tqdm(filenames, total=len(filenames)):
         image = Image.open(filename)
-        embedding = img_model.encode(image)
+        with open(os.devnull, 'w') as f:
+            with redirect_stderr(f):
+                embedding = img_model.encode(image)
         embedding_array.append(embedding)
     input_embedding = np.stack(embedding_array, 0)
     return input_embedding
