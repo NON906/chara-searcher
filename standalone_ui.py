@@ -22,6 +22,7 @@ loaded_target_datas = None
 embedding_file_datas = None
 sorted_similarities_index = None
 sorted_similarities = None
+exclude_datas_indexs = []
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -120,13 +121,13 @@ def load_target_datas(target_datas):
     loaded_target_datas = target_datas
 
 def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None):
-    global embedding_file_datas, sorted_similarities_index, sorted_similarities
+    global embedding_file_datas, sorted_similarities_index, sorted_similarities, exclude_datas_indexs
     if target_datas is not None:
         load_target_datas(target_datas)
 
     if sorted_similarities_index is None or sorted_similarities is None:
         sorted_similarities_index = np.arange(len(embedding_file_datas) - 1, -1, -1)
-        sorted_similarities = np.ones_like(sorted_similarities_index)
+        sorted_similarities = np.ones_like(sorted_similarities_index) * 0.9
 
     positive_keywords = positive_keywords.split(',')
     positive_keywords = [k.strip() for k in positive_keywords]
@@ -151,6 +152,8 @@ def search_filter(threshold, positive_keywords, negative_keywords, export_exclud
             if keyword in embedding_file_datas[index][1]:
                 do_append = False
                 break
+        if index in exclude_datas_indexs:
+            do_append = False
         if do_append:
             ret.append(embedding_file_datas[index][0])
             file_tags = embedding_file_datas[index][1].split(',')
@@ -218,8 +221,23 @@ def search_clear_image(threshold, positive_keywords, negative_keywords, target_d
     result_images, tags_list = search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas)
     return result_images, tags_list
 
-def export(images, dir_name, add_tags, exclude_tags):
-    global sorted_similarities_index, embedding_file_datas
+def is_targeted_image(index, positive_keywords, negative_keywords):
+    global exclude_datas_indexs
+    do_append = True
+    for keyword in positive_keywords:
+        if not keyword in embedding_file_datas[index][1]:
+            do_append = False
+            break
+    for keyword in negative_keywords:
+        if keyword in embedding_file_datas[index][1]:
+            do_append = False
+            break
+    if index in exclude_datas_indexs:
+        do_append = False
+    return do_append
+
+def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords):
+    global sorted_similarities_index, embedding_file_datas, exclude_datas_indexs
     os.makedirs(dir_name, exist_ok=True)
 
     add_tags = add_tags.split(',')
@@ -228,8 +246,13 @@ def export(images, dir_name, add_tags, exclude_tags):
 
     exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
 
-    for loop in range(len(images)):
+    loop = 0
+    for _ in images:
         index = sorted_similarities_index[-loop - 1]
+        while not is_targeted_image(index, positive_keywords, negative_keywords):
+            loop += 1
+            index = sorted_similarities_index[-loop - 1]
+
         file_tags = embedding_file_datas[index][1].split(',')
         file_tags = [k.strip() for k in file_tags]
         file_tags = [k for k in file_tags if k != '']
@@ -254,7 +277,40 @@ def export(images, dir_name, add_tags, exclude_tags):
         with open(txt_path, 'w') as f:
             f.write(', '.join(file_tags))
         
+        loop += 1
+        
     print('* Finish export.')
+
+def click_gallery_image(func_name, gallery_images, threshold, positive_keywords, negative_keywords, evt: gr.SelectData):
+    global exclude_datas_indexs, sorted_similarities_index
+    if func_name == 'Preview':
+        return gr.update(), gr.update(), gr.update(), gr.update()
+
+    loop = 0
+    for _ in range(evt.index + 1):
+        index = sorted_similarities_index[-loop - 1]
+        while not is_targeted_image(index, positive_keywords, negative_keywords):
+            loop += 1
+            index = sorted_similarities_index[-loop - 1]
+        loop += 1
+
+    if func_name == 'Exclude':
+        exclude_datas_indexs.append(index)
+    elif func_name == 'Threshold':
+        threshold = float(sorted_similarities[-loop]) * 100.0
+    
+    return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
+
+def click_gallery_image_search_filter(func_name, *args):
+    if func_name == 'Preview':
+        return gr.update(), gr.update()
+    return search_filter(*args)
+
+def click_reset_exclude_datas(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+    global exclude_datas_indexs
+    exclude_datas_indexs = []
+    gallery_images, export_exclude_tags = search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags)
+    return 'Reset Excluded Images (0)', gallery_images, export_exclude_tags
 
 def main_ui():
     target_datas_choices = get_target_datas_choices()
@@ -272,7 +328,7 @@ def main_ui():
             with gr.Column():
                 target_datas = gr.Dropdown(choices=target_datas_choices, value=target_datas_choices, label='Target Datas', multiselect=True, interactive=True)
         with gr.Row():
-            gr.Markdown(value='## Search And Preview')
+            gr.Markdown(value='## Search')
         with gr.Row():
             with gr.Column():
                 search_image = gr.Image(label='Search Image')
@@ -280,6 +336,8 @@ def main_ui():
             with gr.Column():
                 search_positive_keywords = gr.Textbox(label='Search Tags')
                 search_negative_keywords = gr.Textbox(label='Negative Tags')
+                search_gallery_func_radio = gr.Radio(label='Click on the Image', choices=['Preview', 'Exclude', 'Threshold'], value='Preview', interactive=True)
+                search_exclude_reset_btn = gr.Button(value='Reset Excluded Images (0)')
         with gr.Row():
             search_result_gallery = gr.Gallery(label='Search Result', columns=10)
         with gr.Row():
@@ -310,7 +368,20 @@ def main_ui():
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
 
-        export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags])
+        search_result_gallery.select(fn=click_gallery_image,
+            inputs=[search_gallery_func_radio, search_result_gallery, search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=[search_result_gallery, search_threshold_slider, search_exclude_reset_btn]
+        ).then(fn=click_gallery_image_search_filter,
+            inputs=[search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_exclude_reset_btn.click(fn=click_reset_exclude_datas,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_exclude_reset_btn, search_result_gallery, export_exclude_tags])
+        search_gallery_func_radio.change(fn=lambda f: gr.update(allow_preview= f == 'Preview', preview=False),
+            inputs=search_gallery_func_radio,
+            outputs=search_result_gallery)
+
+        export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords])
 
     return block_interface
 
