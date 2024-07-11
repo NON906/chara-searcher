@@ -23,6 +23,8 @@ embedding_file_datas = None
 sorted_similarities_index = None
 sorted_similarities = None
 exclude_datas_indexs = []
+is_search_state = 'wait'
+click_gallery_image_index = 0
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -120,13 +122,12 @@ def load_target_datas(target_datas):
     embedding = np.concatenate(embedding_array, 0)
     loaded_target_datas = target_datas
 
-def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None):
+def search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags):
     global embedding_file_datas, sorted_similarities_index, sorted_similarities, exclude_datas_indexs
-    if target_datas is not None:
-        load_target_datas(target_datas)
 
-    if sorted_similarities_index is None or sorted_similarities is None:
+    if sorted_similarities_index is None:
         sorted_similarities_index = np.arange(len(embedding_file_datas) - 1, -1, -1)
+    if sorted_similarities is None:
         sorted_similarities = np.ones_like(sorted_similarities_index) * 0.9
 
     positive_keywords = positive_keywords.split(',')
@@ -166,6 +167,8 @@ def search_filter(threshold, positive_keywords, negative_keywords, export_exclud
                     tags[tag] = 1
                 if tags[tag] > max_tags_count:
                     max_tags_count = tags[tag]
+            if len(ret) % 100 == 0:
+                yield ret, gr.update()
 
     tags_count_list = [[] for _ in range(max_tags_count + 1)]
     for tag, count in tags.items():
@@ -176,20 +179,45 @@ def search_filter(threshold, positive_keywords, negative_keywords, export_exclud
         tags_list += tags_count_items
 
     tags_value = []
-    for tag_raw in export_exclude_tags:
-        tag = ' ('.join(tag_raw.split(' (')[:-1])
-        tag_added = False
-        for tag_full in tags_list:
-            if tag in tag_full:
-                tags_value.append(tag_full)
-                tag_added = True
-                break
-        if not tag_added:
-            tags_value.append(tag + ' (0)')
+    if export_exclude_tags is not None:
+        for tag_raw in export_exclude_tags:
+            tag = ' ('.join(tag_raw.split(' (')[:-1])
+            tag_added = False
+            for tag_full in tags_list:
+                if tag in tag_full:
+                    tags_value.append(tag_full)
+                    tag_added = True
+                    break
+            if not tag_added:
+                tags_value.append(tag + ' (0)')
 
-    return ret, gr.update(choices=tags_list, value=tags_value)
+    yield ret, gr.update(choices=tags_list, value=tags_value)
 
-def search_image_sort(target_datas, image, threshold, positive_keywords, negative_keywords, export_exclude_tags):
+def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None):
+    global is_search_state
+
+    if target_datas is not None:
+        load_target_datas(target_datas)
+    
+    for ret_files, ret_tags in search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+        yield ret_files, ret_tags
+        if is_search_state == 'cancel':
+            break
+
+    is_search_state = 'wait'
+
+def search_cancel():
+    global is_search_state
+    if is_search_state == 'running':
+        is_search_state = 'cancel'
+
+def search_wait():
+    global is_search_state
+    while is_search_state != 'wait':
+        yield
+    is_search_state = 'running'
+
+def search_image_sort(target_datas, image):
     global img_model, embedding, sorted_similarities_index, sorted_similarities
     load_target_datas(target_datas)
 
@@ -210,16 +238,12 @@ def search_image_sort(target_datas, image, threshold, positive_keywords, negativ
     sorted_similarities_index = np.argsort(similarities)
     sorted_similarities = np.sort(similarities)
 
-    result_images, tags_list = search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags)
+    return seg_image
 
-    return result_images, seg_image, tags_list
-
-def search_clear_image(threshold, positive_keywords, negative_keywords, target_datas, export_exclude_tags):
+def search_clear_image():
     global sorted_similarities_index, sorted_similarities
     sorted_similarities_index = None
     sorted_similarities = None
-    result_images, tags_list = search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas)
-    return result_images, tags_list
 
 def is_targeted_image(index, positive_keywords, negative_keywords):
     global exclude_datas_indexs
@@ -281,13 +305,17 @@ def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative
         
     print('* Finish export.')
 
-def click_gallery_image(func_name, gallery_images, threshold, positive_keywords, negative_keywords, evt: gr.SelectData):
-    global exclude_datas_indexs, sorted_similarities_index
+def pre_click_gallery_image(evt: gr.SelectData):
+    global click_gallery_image_index
+    click_gallery_image_index = evt.index
+
+def click_gallery_image(func_name, threshold, positive_keywords, negative_keywords):
+    global exclude_datas_indexs, sorted_similarities_index, click_gallery_image_index, sorted_similarities
     if func_name == 'Preview':
-        return gr.update(), gr.update(), gr.update(), gr.update()
+        return gr.update(), gr.update(), gr.update()
 
     loop = 0
-    for _ in range(evt.index + 1):
+    for _ in range(click_gallery_image_index + 1):
         index = sorted_similarities_index[-loop - 1]
         while not is_targeted_image(index, positive_keywords, negative_keywords):
             loop += 1
@@ -301,16 +329,18 @@ def click_gallery_image(func_name, gallery_images, threshold, positive_keywords,
     
     return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
 
-def click_gallery_image_search_filter(func_name, *args):
+def click_gallery_image_search_filter(func_name, threshold, positive_keywords, negative_keywords, export_exclude_tags):
+    global is_search_state
     if func_name == 'Preview':
-        return gr.update(), gr.update()
-    return search_filter(*args)
+        is_search_state = 'wait'
+        return
+    for ret0, ret1 in search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+        yield ret0, ret1
 
-def click_reset_exclude_datas(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+def click_reset_exclude_datas():
     global exclude_datas_indexs
     exclude_datas_indexs = []
-    gallery_images, export_exclude_tags = search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags)
-    return 'Reset Excluded Images (0)', gallery_images, export_exclude_tags
+    return 'Reset Excluded Images (0)'
 
 def main_ui():
     target_datas_choices = get_target_datas_choices()
@@ -352,32 +382,38 @@ def main_ui():
         upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
         upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
 
-        search_image.upload(fn=search_image_sort,
-            inputs=[target_datas, search_image, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, search_image, export_exclude_tags])
-        search_image.clear(fn=search_clear_image,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, target_datas, export_exclude_tags],
+        search_image.upload(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_image_sort,
+            inputs=[target_datas, search_image],
+            outputs=search_image
+        ).then(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
             outputs=[search_result_gallery, export_exclude_tags])
-        search_threshold_slider.change(fn=search_filter,
+        search_image.clear(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_clear_image,
+        ).then(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_threshold_slider.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
-        search_positive_keywords.change(fn=search_filter,
+        search_positive_keywords.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
-        search_negative_keywords.change(fn=search_filter,
+        search_negative_keywords.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
 
-        search_result_gallery.select(fn=click_gallery_image,
-            inputs=[search_gallery_func_radio, search_result_gallery, search_threshold_slider, search_positive_keywords, search_negative_keywords],
-            outputs=[search_result_gallery, search_threshold_slider, search_exclude_reset_btn]
-        ).then(fn=click_gallery_image_search_filter,
-            inputs=[search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, export_exclude_tags])
-        search_exclude_reset_btn.click(fn=click_reset_exclude_datas,
+        search_result_gallery.select(fn=pre_click_gallery_image, queue=False).then(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=click_gallery_image,
+            inputs=[search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            outputs=[search_result_gallery, search_threshold_slider, search_exclude_reset_btn],
+        ).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_exclude_reset_btn, search_result_gallery, export_exclude_tags])
-        search_gallery_func_radio.change(fn=lambda f: gr.update(allow_preview= f == 'Preview', preview=False),
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_exclude_reset_btn.click(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=click_reset_exclude_datas,
+            outputs=search_exclude_reset_btn,
+        ).then(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_gallery_func_radio.input(fn=lambda f: gr.update(allow_preview= f == 'Preview', preview=False),
             inputs=search_gallery_func_radio,
             outputs=search_result_gallery)
 
@@ -391,5 +427,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     block_interface = main_ui()
-
+    block_interface.queue()
     block_interface.launch(inbrowser=(not args.disable_browser_open))
