@@ -27,7 +27,7 @@ exclude_datas_indexs = []
 is_search_state = 'wait'
 click_gallery_image_index = 0
 embedding = None
-global_platform = 'standalone'
+#global_platform = 'standalone'
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -118,28 +118,24 @@ def load_target_datas(target_datas):
         embedding_array.append(np.load(os.path.join(dir_base, 'embedding.npz'))['embedding'])
         with open(os.path.join(dir_base, 'embedding.json'), 'r') as f:
             add_embedding_files = json.load(f)['files']
-        for file in tqdm(add_embedding_files):
+        for file_item in tqdm(add_embedding_files):
+            file = file_item['path']
             txt_path = os.path.join(dir_base, os.path.splitext(file)[0] + '.txt')
             with open(txt_path, 'r') as f:
-                embedding_file_datas.append((os.path.join(dir_base, file), f.read()))
+                embedding_file_datas.append((os.path.join(dir_base, file), f.read(), file_item['width'], file_item['height']))
     if len(embedding_array) > 0:
         embedding = np.concatenate(embedding_array, 0)
     else:
         embedding = None
     loaded_target_datas = target_datas
 
-def search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+def search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags, min_size=128):
     global embedding_file_datas, sorted_similarities_index, sorted_similarities, exclude_datas_indexs
 
     if sorted_similarities_index is None:
         sorted_similarities_index = np.arange(len(embedding_file_datas) - 1, -1, -1)
 
-    positive_keywords = positive_keywords.split(',')
-    positive_keywords = [k.strip() for k in positive_keywords]
-    positive_keywords = [k for k in positive_keywords if k != '']
-    negative_keywords = negative_keywords.split(',')
-    negative_keywords = [k.strip() for k in negative_keywords]
-    negative_keywords = [k for k in negative_keywords if k != '']
+    positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
     ret = []
     tags = {}
     max_tags_count = 0
@@ -149,18 +145,7 @@ def search_filter_main(threshold, positive_keywords, negative_keywords, export_e
             similarity = sorted_similarities[loop]
             if similarity < threshold / 100.0:
                 break
-        do_append = True
-        for keyword in positive_keywords:
-            if not keyword in embedding_file_datas[index][1]:
-                do_append = False
-                break
-        for keyword in negative_keywords:
-            if keyword in embedding_file_datas[index][1]:
-                do_append = False
-                break
-        if index in exclude_datas_indexs:
-            do_append = False
-        if do_append:
+        if is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
             ret.append(embedding_file_datas[index][0])
             file_tags = embedding_file_datas[index][1].split(',')
             file_tags = [k.strip() for k in file_tags]
@@ -198,13 +183,13 @@ def search_filter_main(threshold, positive_keywords, negative_keywords, export_e
 
     yield ret, gr.update(choices=tags_list, value=tags_value)
 
-def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None):
+def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None, min_size=128):
     global is_search_state
 
     if target_datas is not None:
         load_target_datas(target_datas)
     
-    for ret_files, ret_tags in search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags):
+    for ret_files, ret_tags in search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags, min_size):
         yield ret_files, ret_tags
         if is_search_state == 'cancel':
             break
@@ -217,9 +202,9 @@ def search_cancel():
         is_search_state = 'cancel'
 
 def search_wait():
-    global is_search_state, global_platform
-    while is_search_state != 'wait' and global_platform != 'sd-webui':
-        yield
+    global is_search_state
+    #while is_search_state != 'wait':
+    #    yield
     is_search_state = 'running'
 
 def search_image_sort(target_datas, image):
@@ -255,15 +240,8 @@ def search_clear_image():
     sorted_similarities_index = None
     sorted_similarities = None
 
-def is_targeted_image(index, positive_keywords, negative_keywords):
-    global exclude_datas_indexs
-
-    positive_keywords = positive_keywords.split(',')
-    positive_keywords = [k.strip() for k in positive_keywords]
-    positive_keywords = [k for k in positive_keywords if k != '']
-    negative_keywords = negative_keywords.split(',')
-    negative_keywords = [k.strip() for k in negative_keywords]
-    negative_keywords = [k for k in negative_keywords if k != '']
+def is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
+    global exclude_datas_indexs, embedding_file_datas
 
     do_append = True
     for keyword in positive_keywords:
@@ -276,9 +254,21 @@ def is_targeted_image(index, positive_keywords, negative_keywords):
             break
     if index in exclude_datas_indexs:
         do_append = False
+    if embedding_file_datas[index][2] < min_size or embedding_file_datas[index][3] < min_size:
+        do_append = False
     return do_append
 
-def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords):
+def keyword_parse(positive_keywords, negative_keywords):
+    positive_keywords = positive_keywords.split(',')
+    positive_keywords = [k.strip() for k in positive_keywords]
+    positive_keywords = [k for k in positive_keywords if k != '']
+    negative_keywords = negative_keywords.split(',')
+    negative_keywords = [k.strip() for k in negative_keywords]
+    negative_keywords = [k for k in negative_keywords if k != '']
+
+    return positive_keywords, negative_keywords
+
+def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords, min_size=128):
     global sorted_similarities_index, embedding_file_datas, exclude_datas_indexs
     os.makedirs(dir_name, exist_ok=True)
 
@@ -288,10 +278,11 @@ def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative
 
     exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
 
+    positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
     loop = 0
     for _ in images:
         index = sorted_similarities_index[-loop - 1]
-        while not is_targeted_image(index, positive_keywords, negative_keywords):
+        while not is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
             loop += 1
             index = sorted_similarities_index[-loop - 1]
 
@@ -327,15 +318,16 @@ def pre_click_gallery_image(evt: gr.SelectData):
     global click_gallery_image_index
     click_gallery_image_index = evt.index
 
-def click_gallery_image(func_name, threshold, positive_keywords, negative_keywords):
+def click_gallery_image(func_name, threshold, positive_keywords, negative_keywords, min_size=128):
     global exclude_datas_indexs, sorted_similarities_index, click_gallery_image_index, sorted_similarities
     if func_name == 'Preview':
         return gr.update(), gr.update(), gr.update()
 
+    positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
     loop = 0
     for _ in range(click_gallery_image_index + 1):
         index = sorted_similarities_index[-loop - 1]
-        while not is_targeted_image(index, positive_keywords, negative_keywords):
+        while not is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
             loop += 1
             index = sorted_similarities_index[-loop - 1]
         loop += 1
@@ -353,8 +345,8 @@ def click_reset_exclude_datas():
     return 'Reset Excluded Images (0)'
 
 def main_ui(platform='standalone'):
-    global global_platform
-    global_platform = platform
+    #global global_platform
+    #global_platform = platform
 
     target_datas_choices = get_target_datas_choices()
     dt_now = datetime.datetime.now()
