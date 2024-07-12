@@ -28,9 +28,10 @@ if platform == 'sd-webui':
     launch.run(f'"{launch.python}" -m mim install "mmcv>=2.0.0"')
     launch.run(f'"{launch.python}" -m mim install mmdet')
 
+    pip_list_str = launch.run(f'"{launch.python}" -m pip list')
+    pip_list_lines = pip_list_str.splitlines()
+
     if not launch.is_installed('onnxruntime') and not launch.is_installed('onnxruntime-gpu'):
-        pip_list_str = launch.run(f'"{launch.python}" -m pip list')
-        pip_list_lines = pip_list_str.splitlines()
         torch_lines = [item for item in pip_list_lines if item.startswith('torch')]
         torch_version = None
         if torch_lines and len(torch_lines) > 0:
@@ -45,7 +46,14 @@ if platform == 'sd-webui':
             launch.run_pip('install onnxruntime==1.17.3', 'onnxruntime')
 
     if not launch.is_installed('chara-searcher requirements'):
-        launch.run_pip('install -r requirements.txt', 'chara-searcher requirements')
+        transformers_lines = [item for item in pip_list_lines if item.startswith('transformers')]
+        transformers_version = None
+        if transformers_lines and len(transformers_lines) > 0:
+            transformers_version = transformers_lines[0].split()[-1]
+        if transformers_version is None:
+            launch.run_pip('install -r requirements.txt', 'chara-searcher requirements')
+        else:
+            launch.run_pip('install transformers==' + transformers_version + ' -r requirements.txt', 'chara-searcher requirements')
 
 elif platform == 'standalone':
     os.chdir(os.path.dirname(__file__))
@@ -80,6 +88,8 @@ elif platform == 'standalone':
                 subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu==1.17.1'])
         else:
             subprocess.run([sys.executable, '-m', 'pip', 'install', 'onnxruntime==1.17.3'])
+
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'transformers>=4.34.0'])
 
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 

@@ -12,6 +12,7 @@ from PIL import Image
 import numpy as np
 import json
 import datetime
+from sklearn.metrics.pairwise import cosine_similarity
 
 from segmentation import segmentation_main, segmentation_single
 from tagging import tagging_main
@@ -25,6 +26,8 @@ sorted_similarities = None
 exclude_datas_indexs = []
 is_search_state = 'wait'
 click_gallery_image_index = 0
+embedding = None
+global_platform = 'standalone'
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -119,7 +122,10 @@ def load_target_datas(target_datas):
             txt_path = os.path.join(dir_base, os.path.splitext(file)[0] + '.txt')
             with open(txt_path, 'r') as f:
                 embedding_file_datas.append((os.path.join(dir_base, file), f.read()))
-    embedding = np.concatenate(embedding_array, 0)
+    if len(embedding_array) > 0:
+        embedding = np.concatenate(embedding_array, 0)
+    else:
+        embedding = None
     loaded_target_datas = target_datas
 
 def search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags):
@@ -211,14 +217,16 @@ def search_cancel():
         is_search_state = 'cancel'
 
 def search_wait():
-    global is_search_state
-    while is_search_state != 'wait':
+    global is_search_state, global_platform
+    while is_search_state != 'wait' and global_platform != 'sd-webui':
         yield
     is_search_state = 'running'
 
 def search_image_sort(target_datas, image):
     global img_model, embedding, sorted_similarities_index, sorted_similarities
     load_target_datas(target_datas)
+    if embedding is None or img_model is None:
+        return None
 
     image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
@@ -231,7 +239,10 @@ def search_image_sort(target_datas, image):
     pil_image = Image.fromarray(seg_image)
     image_embedding = img_model.encode(pil_image)
 
-    similarities = img_model.similarity(embedding, image_embedding)
+    if hasattr(img_model, 'similarity'):
+        similarities = img_model.similarity(embedding, image_embedding)
+    else:
+        similarities = cosine_similarity(embedding, np.array([image_embedding, ]))
     similarities = np.squeeze(similarities)
 
     sorted_similarities_index = np.argsort(similarities)
@@ -341,7 +352,10 @@ def click_reset_exclude_datas():
     exclude_datas_indexs = []
     return 'Reset Excluded Images (0)'
 
-def main_ui():
+def main_ui(platform='standalone'):
+    global global_platform
+    global_platform = platform
+
     target_datas_choices = get_target_datas_choices()
     dt_now = datetime.datetime.now()
     save_dt = dt_now.strftime('%Y%m%d_%H%M%S')
@@ -394,10 +408,16 @@ def main_ui():
         search_threshold_slider.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
-        search_positive_keywords.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
+        search_positive_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
-        search_negative_keywords.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
+        search_positive_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_negative_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
+            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags])
+        search_negative_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
             inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
             outputs=[search_result_gallery, export_exclude_tags])
 
