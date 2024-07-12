@@ -127,8 +127,6 @@ def search_filter_main(threshold, positive_keywords, negative_keywords, export_e
 
     if sorted_similarities_index is None:
         sorted_similarities_index = np.arange(len(embedding_file_datas) - 1, -1, -1)
-    if sorted_similarities is None:
-        sorted_similarities = np.ones_like(sorted_similarities_index) * 0.9
 
     positive_keywords = positive_keywords.split(',')
     positive_keywords = [k.strip() for k in positive_keywords]
@@ -141,9 +139,10 @@ def search_filter_main(threshold, positive_keywords, negative_keywords, export_e
     max_tags_count = 0
     for loop in range(sorted_similarities_index.shape[0] - 1, -1, -1):
         index = sorted_similarities_index[loop]
-        similarity = sorted_similarities[loop]
-        if similarity < threshold / 100.0:
-            break
+        if sorted_similarities is not None:
+            similarity = sorted_similarities[loop]
+            if similarity < threshold / 100.0:
+                break
         do_append = True
         for keyword in positive_keywords:
             if not keyword in embedding_file_datas[index][1]:
@@ -247,6 +246,14 @@ def search_clear_image():
 
 def is_targeted_image(index, positive_keywords, negative_keywords):
     global exclude_datas_indexs
+
+    positive_keywords = positive_keywords.split(',')
+    positive_keywords = [k.strip() for k in positive_keywords]
+    positive_keywords = [k for k in positive_keywords if k != '']
+    negative_keywords = negative_keywords.split(',')
+    negative_keywords = [k.strip() for k in negative_keywords]
+    negative_keywords = [k for k in negative_keywords if k != '']
+
     do_append = True
     for keyword in positive_keywords:
         if not keyword in embedding_file_datas[index][1]:
@@ -324,18 +331,10 @@ def click_gallery_image(func_name, threshold, positive_keywords, negative_keywor
 
     if func_name == 'Exclude':
         exclude_datas_indexs.append(index)
-    elif func_name == 'Threshold':
+    elif func_name == 'Threshold' and sorted_similarities is not None:
         threshold = float(sorted_similarities[-loop]) * 100.0
     
     return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
-
-def click_gallery_image_search_filter(func_name, threshold, positive_keywords, negative_keywords, export_exclude_tags):
-    global is_search_state
-    if func_name == 'Preview':
-        is_search_state = 'wait'
-        return
-    for ret0, ret1 in search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags):
-        yield ret0, ret1
 
 def click_reset_exclude_datas():
     global exclude_datas_indexs
