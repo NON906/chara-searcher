@@ -7,11 +7,14 @@ from PIL import Image
 from pathlib import Path
 from tqdm import tqdm
 import re
+import cv2
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'wd14-tagger-standalone'))
 from tagger.interrogator import Interrogator
 from tagger.interrogators import interrogators
 sys.path = sys.path[:-1]
+
+from calc_embedding import convert_rgba_to_rgb
 
 class Args:
     dir: str
@@ -99,7 +102,12 @@ def image_interrogate(image_path: Path, tag_escape: bool, exclude_tags: Iterable
     """
     Predictions from a image path
     """
-    im = Image.open(image_path)
+    image = cv2.imread(image_path, -1)
+    if image.shape[2] == 4:
+        image = convert_rgba_to_rgb(image)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    im = Image.fromarray(image)
+
     result = interrogator.interrogate(im)
 
     return postprocess_tags(

@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 import glob
 import torch
+import traceback
 
 sys.path = [os.path.join(os.path.dirname(__file__), 'CartoonSegmentation'), ] + sys.path
 from animeinsseg import AnimeInsSeg, AnimeInstances, prepare_refine_batch
@@ -72,10 +73,8 @@ def segmentation_single(img, mask_thres=0.6, instance_thres=0.3, padding_size=0.
         p = p.clip(0.0, 1.0)
         if img.shape[2] == 4:
             p = p * img[:,:,3] / 255.0
-        p = np.stack([p, p, p], 2)
-        dst = np.ones_like(src) * 255.0
-        dst *= 1.0 - p
-        dst += src * p
+        p = p[:, :, np.newaxis] * 255.0
+        dst = np.concatenate([src, p], axis=2)
         dst = dst.astype(src.dtype)
 
         left_x = int(xywh[0] - padding_size * xywh[2])
@@ -118,8 +117,9 @@ def segmentation_main(filenames, src_images_dir='src_images', mask_thres=0.6, in
                     save_filename = os.path.join(src_images_dir, os.path.splitext('_'.join(filename.replace('\\', '/').split('/')[-2:]))[0] + '_' + str(ii) + '.png')
                     #print(save_filename)
                     cv2.imwrite(save_filename, trim_dst)
-        except:
-            pass
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
 
 if __name__ == '__main__':
     filenames = glob.glob('org_images/**/*.*', recursive=True)

@@ -16,7 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from segmentation import segmentation_main, segmentation_single
 from tagging import tagging_main
-from calc_embedding import calc_embedding_main
+from calc_embedding import calc_embedding_main, convert_rgba_to_rgb
 
 img_model = None
 loaded_target_datas = None
@@ -213,15 +213,23 @@ def search_image_sort(target_datas, image):
     if embedding is None or img_model is None:
         return None
 
-    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    if image.shape[2] == 3:
+        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-    seg_images = segmentation_single(image_bgr)
-    if len(seg_images) > 0:
-        seg_image = cv2.cvtColor(seg_images[0], cv2.COLOR_BGR2RGB)
+        seg_images = segmentation_single(image_bgr)
+        if len(seg_images) > 0:
+            seg_image = cv2.cvtColor(seg_images[0], cv2.COLOR_BGRA2RGBA)
+        else:
+            seg_image = image
     else:
         seg_image = image
 
-    pil_image = Image.fromarray(seg_image)
+    if seg_image.shape[2] == 4:
+        search_image = convert_rgba_to_rgb(seg_image)
+    else:
+        search_image = seg_image
+
+    pil_image = Image.fromarray(search_image)
     image_embedding = img_model.encode(pil_image)
 
     if hasattr(img_model, 'similarity'):
@@ -268,7 +276,7 @@ def keyword_parse(positive_keywords, negative_keywords):
 
     return positive_keywords, negative_keywords
 
-def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords, min_size=128):
+def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords, min_size=128, color=[255, 255, 255]):
     global sorted_similarities_index, embedding_file_datas, exclude_datas_indexs
     os.makedirs(dir_name, exist_ok=True)
 
@@ -305,7 +313,12 @@ def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative
             dir_loop += 1
             target_file = target_file_base + '_' + str(dir_loop) + ext
 
-        shutil.copy2(embedding_file_datas[index][0], target_file)
+        if color is None:
+            shutil.copy2(embedding_file_datas[index][0], target_file)
+        else:
+            copy_image = cv2.imread(embedding_file_datas[index][0], -1)
+            copy_image = convert_rgba_to_rgb(copy_image, color)
+            cv2.imwrite(target_file, copy_image)
         txt_path = os.path.splitext(target_file)[0] + '.txt'
         with open(txt_path, 'w') as f:
             f.write(', '.join(file_tags))

@@ -10,12 +10,27 @@ import shutil
 import json
 from pathlib import Path
 from contextlib import redirect_stderr
+import cv2
+
+def convert_rgba_to_rgb(img, color=[255, 255, 255]):
+    src = img[:,:,0:3]
+    p = img[:,:,3] / 255.0
+    p = np.stack([p, p, p], 2)
+    dst = np.ones_like(src, dtype='float64') * np.array([[color]], dtype='float64')
+    dst *= 1.0 - p
+    dst += src * p
+    dst = dst.astype(src.dtype)
+    return dst
 
 def calc_embedding(filenames, img_model):
     embedding_array = []
     sizes = []
     for filename in tqdm(filenames, total=len(filenames)):
-        image = Image.open(filename)
+        image = cv2.imread(filename, -1)
+        if image.shape[2] == 4:
+            image = convert_rgba_to_rgb(image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
         sizes.append(image.size)
         with open(os.devnull, 'w') as f:
             with redirect_stderr(f):
