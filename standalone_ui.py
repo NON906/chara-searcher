@@ -54,13 +54,13 @@ def upload_dir_files(files, data_name, target_datas):
     
     os.makedirs(src_images_dir, exist_ok=True)
 
-    print('* Processing segmentation.')
+    print('* (step 1/3) Processing segmentation.')
     segmentation_main(file_paths, src_images_dir)
 
-    print('* Processing tagging.')
+    print('* (step 2/3) Processing tagging.')
     tagging_main(src_images_dir)
 
-    print('* Processing calc embedding.')
+    print('* (step 3/3) Processing calc embedding.')
     calc_embedding_main(src_images_dir)
 
     return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
@@ -77,7 +77,7 @@ def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
     if fps > 0.0:
         span = 1.0 / str(fps)
 
-    print('* Processing segmentation.')
+    print('* (step 1/3) Processing segmentation.')
     container = av.open(file.name, options={'skip_frame': 'nokey'})
     stream = container.streams.video[0]
     next_time = 0.0
@@ -93,10 +93,10 @@ def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
             next_time += span
             frame_count += 1
 
-    print('* Processing tagging.')
+    print('* (step 2/3) Processing tagging.')
     tagging_main(src_images_dir)
 
-    print('* Processing calc embedding.')
+    print('* (step 3/3) Processing calc embedding.')
     calc_embedding_main(src_images_dir)
 
     return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
@@ -372,7 +372,7 @@ def main_ui(platform='standalone'):
             with gr.Column():
                 upload_data_name = gr.Textbox(label='Data Name')
                 upload_dir_btn = gr.UploadButton(label='Upload Images Directory', file_count='directory')
-                upload_video_file_btn = gr.UploadButton(label='Upload Video Files')
+                upload_video_file_btn = gr.UploadButton(label='Upload Video File')
             with gr.Column():
                 target_datas = gr.Dropdown(choices=target_datas_choices, value=target_datas_choices, label='Target Datas', multiselect=True, interactive=True)
         with gr.Row():
