@@ -24,9 +24,7 @@ if platform == 'sd-webui':
 
     if not launch.is_installed('openmim'):
         launch.run_pip('install -U openmim', 'openmim')
-    launch.run(f'"{launch.python}" -m mim install mmengine')
-    launch.run(f'"{launch.python}" -m mim install "mmcv>=2.0.0"')
-    launch.run(f'"{launch.python}" -m mim install mmdet')
+    launch.run(f'"{launch.python}" -m mim install mmengine "mmcv>=2.0.0" mmdet')
 
     pip_list_str = launch.run(f'"{launch.python}" -m pip list')
     pip_list_lines = pip_list_str.splitlines()
