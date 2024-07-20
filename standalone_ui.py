@@ -14,7 +14,7 @@ import json
 import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 
-from segmentation import segmentation_main, segmentation_single
+from segmentation import segmentation_main, segmentation_single, segmentation_unload_net
 from tagging import tagging_main
 from calc_embedding import calc_embedding_main, convert_rgba_to_rgb
 
@@ -46,6 +46,8 @@ def get_target_datas_choices():
     return target_datas_choices
 
 def upload_dir_files(files, data_name, target_datas):
+    global img_model
+
     if data_name is None or data_name == '':
         data_name = 'Untitled'
     src_images_dir = get_unique_dir(data_name)
@@ -61,11 +63,15 @@ def upload_dir_files(files, data_name, target_datas):
     tagging_main(src_images_dir)
 
     print('* (step 3/3) Processing calc embedding.')
-    calc_embedding_main(src_images_dir)
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
+    calc_embedding_main(src_images_dir, img_model)
 
     return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
 
 def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
+    global img_model
+
     if type(file) == list:
         file = file[0]
     if data_name is None or data_name == '':
@@ -97,7 +103,9 @@ def upload_video_file(file, data_name, target_datas, span=4.0, fps=-1.0):
     tagging_main(src_images_dir)
 
     print('* (step 3/3) Processing calc embedding.')
-    calc_embedding_main(src_images_dir)
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
+    calc_embedding_main(src_images_dir, img_model)
 
     return '', gr.update(choices=get_target_datas_choices(), value=target_datas + [os.path.basename(src_images_dir), ])
 
@@ -357,6 +365,14 @@ def click_reset_exclude_datas():
     exclude_datas_indexs = []
     return 'Reset Excluded Images (0)'
 
+def unload_models():
+    global img_model
+    if img_model is not None:
+        del img_model
+        img_model = None
+    segmentation_unload_net()
+    print('* Finish unload models.')
+
 def main_ui(platform='standalone'):
     #global global_platform
     #global_platform = platform
@@ -396,6 +412,10 @@ def main_ui(platform='standalone'):
                 export_add_tags = gr.Textbox(label='Additional Tags', value='white background, simple background', interactive=True)
                 export_exclude_tags = gr.Dropdown(choices=[], value=[], label='Exclude Tags', multiselect=True, interactive=True)
                 export_button = gr.Button(value='Export')
+        with gr.Row():
+            gr.Markdown(value='## Others')
+        with gr.Row():
+            unload_button = gr.Button(value='Unload Models')
 
         upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
         upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
@@ -442,6 +462,8 @@ def main_ui(platform='standalone'):
             outputs=search_result_gallery)
 
         export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords])
+
+        unload_button.click(fn=unload_models)
 
         def on_load():
             return target_datas_choices, 'outputs/export_train_datas/' + save_dt

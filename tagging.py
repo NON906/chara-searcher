@@ -156,5 +156,8 @@ def tagging_main(dir='src_images', threshold=0.35):
         with open(caption_path, 'w') as fp:
             fp.write(tags_str)
 
+    interrogator.unload()
+    interrogator = None
+
 if __name__ == '__main__':
     tagging_main()

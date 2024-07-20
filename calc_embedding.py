@@ -39,8 +39,9 @@ def calc_embedding(filenames, img_model):
     input_embedding = np.stack(embedding_array, 0)
     return input_embedding, sizes
 
-def calc_embedding_main(dir_path='src_images'):
-    img_model = SentenceTransformer('clip-ViT-B-32')
+def calc_embedding_main(dir_path='src_images', img_model=None):
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
     save_npz_path = os.path.join(dir_path, 'embedding.npz')
     save_json_path = os.path.join(dir_path, 'embedding.json')
 
