@@ -443,6 +443,10 @@ def main_ui(platform='standalone'):
 
         export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords])
 
+        def on_load():
+            return target_datas_choices, 'outputs/export_train_datas/' + save_dt
+        block_interface.load(fn=on_load, outputs=[target_datas, export_dir_name])
+
     return block_interface
 
 if __name__ == '__main__':
