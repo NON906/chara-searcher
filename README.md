@@ -12,7 +12,7 @@ This is a repository for "character images search" from image and tags.
 
 ## How to Install and Run
 
-### Use standalone (recommended)
+### Use standalone
 
 If you can use the conda command (Anaconda), you can install it with the command below.
 
