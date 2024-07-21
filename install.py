@@ -89,6 +89,8 @@ elif platform == 'standalone':
 
     subprocess.run([sys.executable, '-m', 'pip', 'install', 'transformers>=4.34.0'])
 
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'gradio==3.41.2'])
+
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 
 os.chdir(os.path.join(os.path.dirname(__file__), 'CartoonSegmentation'))
