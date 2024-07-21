@@ -43,15 +43,14 @@ if platform == 'sd-webui':
         else:
             launch.run_pip('install onnxruntime==1.17.3', 'onnxruntime')
 
-    if not launch.is_installed('chara-searcher requirements'):
-        transformers_lines = [item for item in pip_list_lines if item.startswith('transformers')]
-        transformers_version = None
-        if transformers_lines and len(transformers_lines) > 0:
-            transformers_version = transformers_lines[0].split()[-1]
-        if transformers_version is None:
-            launch.run_pip('install -r requirements.txt', 'chara-searcher requirements')
-        else:
-            launch.run_pip('install transformers==' + transformers_version + ' -r requirements.txt', 'chara-searcher requirements')
+    transformers_lines = [item for item in pip_list_lines if item.startswith('transformers')]
+    transformers_version = None
+    if transformers_lines and len(transformers_lines) > 0:
+        transformers_version = transformers_lines[0].split()[-1]
+    if transformers_version is None:
+        launch.run_pip('install -r requirements.txt', 'chara-searcher requirements')
+    else:
+        launch.run_pip('install transformers==' + transformers_version + ' -r requirements.txt', 'chara-searcher requirements')
 
 elif platform == 'standalone':
     os.chdir(os.path.dirname(__file__))
