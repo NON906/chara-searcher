@@ -15,7 +15,7 @@ imageio
 imgaug
 git+https://github.com/cocodataset/panopticapi.git
 pytorch-lightning
-albumentations==1.1.0
+albumentations<1.4.4
 huggingface_hub
 omegaconf
 diffusers
