@@ -24,7 +24,7 @@ if platform == 'sd-webui':
 
     if not launch.is_installed('openmim'):
         launch.run_pip('install -U openmim', 'openmim')
-    launch.run(f'"{launch.python}" -m mim install mmengine "mmcv>=2.0.0" mmdet')
+    launch.run(f'"{launch.python}" -m mim install mmengine "mmcv>=2.0.0,<2.2.0" "mmdet>=3.3.0"')
 
     pip_list_str = launch.run(f'"{launch.python}" -m pip list')
     pip_list_lines = pip_list_str.splitlines()
@@ -58,8 +58,8 @@ elif platform == 'standalone':
 
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-U', 'openmim'])
     subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmengine'])
-    subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmcv>=2.0.0'])
-    subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmdet'])
+    subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmcv>=2.0.0,<2.2.0'])
+    subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmdet>=3.3.0'])
 
     conda_list_str = subprocess.run(['conda', 'list'], capture_output=True, text=True, shell=True).stdout
     conda_list_lines = conda_list_str.splitlines()
