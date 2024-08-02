@@ -13,6 +13,8 @@ import numpy as np
 import json
 import datetime
 from sklearn.metrics.pairwise import cosine_similarity
+import sys
+import logging
 
 from segmentation import segmentation_main, segmentation_single, segmentation_unload_net
 from tagging import tagging_main
@@ -470,6 +472,10 @@ def main_ui(platform='standalone'):
         block_interface.load(fn=on_load, outputs=[target_datas, export_dir_name])
 
     return block_interface
+
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(level=logging.WARNING)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
