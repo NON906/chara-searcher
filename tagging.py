@@ -102,7 +102,7 @@ def image_interrogate(image_path: Path, tag_escape: bool, exclude_tags: Iterable
     """
     Predictions from a image path
     """
-    image = cv2.imread(image_path, -1)
+    image = cv2.imread(os.path.abspath(image_path), -1)
     if image.shape[2] == 4:
         image = convert_rgba_to_rgb(image)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
