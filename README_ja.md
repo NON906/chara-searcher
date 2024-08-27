@@ -17,7 +17,7 @@ condaコマンド（Anaconda）を使用できる場合は、以下のコマン�
 ```
 conda create -n chara-searcher python=3.10
 conda activate chara-searcher
-conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+conda install "pytorch<=2.1" torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 python install.py
 ```
 
