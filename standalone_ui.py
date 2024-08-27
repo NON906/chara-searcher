@@ -15,10 +15,15 @@ import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 import sys
 import logging
+from duckduckgo_search import DDGS
+import requests
+import threading
+from urllib.parse import urlparse
+import time
 
 from segmentation import segmentation_main, segmentation_single, segmentation_unload_net
-from tagging import tagging_main
-from calc_embedding import calc_embedding_main, convert_rgba_to_rgb
+from tagging import tagging_main, tagging_in_memory, tagging_unload
+from calc_embedding import calc_embedding_main, convert_rgba_to_rgb, calc_embedding_in_memory
 
 img_model = None
 loaded_target_datas = None
@@ -30,6 +35,11 @@ is_search_state = 'wait'
 click_gallery_image_index = 0
 embedding = None
 #global_platform = 'standalone'
+ddg_datas = {}
+ddg_target_urls = []
+ddg_preview_datas = []
+ddg_loading_domains = []
+ddg_loading_images = []
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -193,14 +203,243 @@ def search_filter_main(threshold, positive_keywords, negative_keywords, export_e
 
     yield ret, gr.update(choices=tags_list, value=tags_value)
 
-def search_filter(threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None, min_size=128):
+def search_filter(mode, threshold, positive_keywords, negative_keywords, export_exclude_tags, target_datas=None, min_size=128):
     global is_search_state
+
+    if mode != 'Local':
+        yield gr.update(), gr.update()
+        return
 
     if target_datas is not None:
         load_target_datas(target_datas)
     
     for ret_files, ret_tags in search_filter_main(threshold, positive_keywords, negative_keywords, export_exclude_tags, min_size):
         yield ret_files, ret_tags
+        if is_search_state == 'cancel':
+            break
+
+    is_search_state = 'wait'
+
+def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
+    global ddg_datas, ddg_target_urls, img_model, ddg_loading_domains, ddg_loading_images
+
+    if mode != 'DuckDuckGo':
+        return
+
+    ddg_results = DDGS().images(
+        keywords=ddg_keywords,
+        region=region,
+        safesearch=safesearch,
+    )
+
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
+
+    ddg_target_urls = []
+
+    for ddg_result in ddg_results:
+        url = ddg_result['image']
+        if not url in ddg_datas:
+            ddg_datas[url] = 'Waiting'
+
+    def loading_process(url):
+        global ddg_loading_domains, ddg_loading_images
+
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        while domain in ddg_loading_domains:
+            time.sleep(0.01)
+        ddg_loading_domains.append(domain)
+
+        response = requests.get(url)
+        image = cv2.imdecode(np.frombuffer(response.content, np.uint8), -1)
+        if image is None:
+            print('error: ' + url)
+            ddg_datas[url] = 'Error'
+            time.sleep(0.5)
+            ddg_loading_domains.remove(domain)
+            return False
+
+        ddg_loading_images.append({
+            'image': image,
+            'url': url,
+        })
+
+        ddg_loading_domains.remove(domain)
+        return True
+
+    is_first_loop = True
+    for ddg_result in ddg_results:
+        url = ddg_result['image']
+        ddg_target_urls.append(url)
+        if ddg_datas[url] == 'Waiting':
+            ddg_datas[url] = 'Loading'
+            if is_first_loop:
+                is_first_loop = not loading_process(url)
+            else:
+                thread = threading.Thread(target=loading_process, args=(url, ))
+                thread.start()
+
+def loading_ddg():
+    global ddg_loading_images
+    
+    target_images = ddg_loading_images
+    ddg_loading_images = []
+
+    seg_images = []
+    urls = []
+    for target_data in target_images:
+        image = target_data['image']
+        url = target_data['url']
+
+        raw_seg_images = segmentation_single(image)
+        for seg_image in raw_seg_images:
+            seg_images.append(cv2.cvtColor(seg_image, cv2.COLOR_BGRA2RGBA))
+            urls.append(url)
+        del image
+
+    embeddings, sizes = calc_embedding_in_memory(seg_images, img_model)
+
+    tags = tagging_in_memory(seg_images)
+    
+    data_dict_array = []
+    for loop in range(len(seg_images)):
+        data_dict = {
+            'image': seg_images[loop],
+            'embedding': embeddings[loop],
+            'size': sizes[loop],
+            'tags': tags[loop],
+        }
+        if ddg_datas[urls[loop]] == 'Loading':
+            ddg_datas[urls[loop]] = [data_dict, ]
+            print('loaded: ' + urls[loop])
+        else:
+            ddg_datas[urls[loop]].append(data_dict)
+
+def search_filter_ddg_main(threshold, positive_keywords, negative_keywords, export_exclude_tags, image, min_size=128):
+    global ddg_datas, ddg_target_urls, ddg_preview_datas, exclude_datas_indexs
+
+    if image is not None:
+        if image.shape[2] == 3:
+            image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+            seg_images = segmentation_single(image_bgr)
+            if len(seg_images) > 0:
+                seg_image = cv2.cvtColor(seg_images[0], cv2.COLOR_BGRA2RGBA)
+            else:
+                seg_image = image
+        else:
+            seg_image = image
+
+        if seg_image.shape[2] == 4:
+            search_image = convert_rgba_to_rgb(seg_image)
+        else:
+            search_image = seg_image
+
+        pil_image = Image.fromarray(search_image)
+        image_embedding = img_model.encode(pil_image)
+    else:
+        seg_image = gr.update()
+        image_embedding = None
+
+    positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
+    ret_list = []
+    tags = {}
+    max_tags_count = 0
+    target_urls = ddg_target_urls
+
+    is_finished = False
+    while not is_finished:
+        is_finished = True
+
+        loading_ddg()
+
+        new_target_urls = []
+
+        for url in target_urls:
+            if ddg_datas[url] == 'Waiting' or ddg_datas[url] == 'Loading':
+                is_finished = False
+                new_target_urls.append(url)
+                continue
+            elif ddg_datas[url] == 'Error':
+                continue
+            for data in ddg_datas[url]:
+                do_append = True
+                for keyword in positive_keywords:
+                    if not keyword in data['tags']:
+                        do_append = False
+                        break
+                for keyword in negative_keywords:
+                    if keyword in data['tags']:
+                        do_append = False
+                        break
+                if data['size'][0] < min_size or data['size'][1] < min_size:
+                    do_append = False
+                if not do_append:
+                    continue
+
+                if image_embedding is not None:
+                    if hasattr(img_model, 'similarity'):
+                        similarities = img_model.similarity(data['embedding'], image_embedding)
+                    else:
+                        similarities = cosine_similarity(np.array([data['embedding'], ]), np.array([image_embedding, ]))
+                    similarities = np.squeeze(similarities)
+                    if similarities[0] < threshold / 100.0:
+                        continue
+
+                ddg_preview_datas.append(data)
+                ret_list.append(data['image'])
+
+                file_tags = data['tags'].split(',')
+                file_tags = [k.strip() for k in file_tags]
+                file_tags = [k for k in file_tags if k != '']
+                for tag in file_tags:
+                    if tag in tags:
+                        tags[tag] += 1
+                    else:
+                        tags[tag] = 1
+                    if tags[tag] > max_tags_count:
+                        max_tags_count = tags[tag]
+
+        target_urls = new_target_urls
+
+        tags_count_list = [[] for _ in range(max_tags_count + 1)]
+        for tag, count in tags.items():
+            tags_count_list[count].append(tag + ' (' + str(count) + ')')
+        tags_list = []
+        tags_count_list = tags_count_list[::-1]
+        for tags_count_items in tags_count_list:
+            tags_list += tags_count_items
+
+        tags_value = []
+        if export_exclude_tags is not None:
+            for tag_raw in export_exclude_tags:
+                tag = ' ('.join(tag_raw.split(' (')[:-1])
+                tag_added = False
+                for tag_full in tags_list:
+                    if tag in tag_full:
+                        tags_value.append(tag_full)
+                        tag_added = True
+                        break
+                if not tag_added:
+                    tags_value.append(tag + ' (0)')
+            
+        ret = []
+        for loop, val in enumerate(ret_list):
+            if not loop in exclude_datas_indexs:
+                ret.append(val)
+
+        yield ret, gr.update(choices=tags_list, value=tags_value), seg_image
+
+def search_filter_ddg(mode, threshold, positive_keywords, negative_keywords, export_exclude_tags, image, min_size=128):
+    global is_search_state
+
+    if mode != 'DuckDuckGo':
+        yield gr.update(), gr.update(), gr.update()
+        return
+
+    for ret_files, ret_tags, ret_image in search_filter_ddg_main(threshold, positive_keywords, negative_keywords, export_exclude_tags, image, min_size):
+        yield ret_files, ret_tags, ret_image
         if is_search_state == 'cancel':
             break
 
@@ -217,8 +456,12 @@ def search_wait():
     #    yield
     is_search_state = 'running'
 
-def search_image_sort(target_datas, image):
+def search_image_sort(mode, target_datas, image):
     global img_model, embedding, sorted_similarities_index, sorted_similarities
+
+    if mode != 'Local':
+        return gr.update()
+
     load_target_datas(target_datas)
     if embedding is None or img_model is None:
         return None
@@ -286,8 +529,12 @@ def keyword_parse(positive_keywords, negative_keywords):
 
     return positive_keywords, negative_keywords
 
-def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords, min_size=128, color=[255, 255, 255]):
+def export(mode, images, dir_name, add_tags, exclude_tags, positive_keywords, negative_keywords, min_size=128, color=[255, 255, 255]):
     global sorted_similarities_index, embedding_file_datas, exclude_datas_indexs
+
+    if mode != 'Local':
+        return
+
     os.makedirs(dir_name, exist_ok=True)
 
     add_tags = add_tags.split(',')
@@ -337,6 +584,48 @@ def export(images, dir_name, add_tags, exclude_tags, positive_keywords, negative
         
     print('* Finish export.')
 
+def export_ddg(mode, dir_name, add_tags, exclude_tags, color=[255, 255, 255]):
+    global ddg_preview_datas
+
+    if mode != 'DuckDuckGo':
+        return
+
+    os.makedirs(dir_name, exist_ok=True)
+
+    add_tags = add_tags.split(',')
+    add_tags = [k.strip() for k in add_tags]
+    add_tags = [k for k in add_tags if k != '']
+
+    exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
+
+    file_count = 0
+    for loop, data in ddg_preview_datas:
+        if loop in exclude_datas_indexs:
+            continue
+
+        image = data['image']
+        if color is not None:
+            image = convert_rgba_to_rgb(image, color)
+        cv2.imwrite(file_count + ".png", image)
+
+        file_tags = data['tags'].split(',')
+        file_tags = [k.strip() for k in file_tags]
+        file_tags = [k for k in file_tags if k != '']
+        for tag in exclude_tags:
+            if tag in file_tags:
+                file_tags.remove(tag)
+        for tag in add_tags:
+            if tag in file_tags:
+                file_tags.remove(tag)
+        txt_path = file_count + '.txt'
+        file_tags = add_tags + file_tags
+        with open(txt_path, 'w') as f:
+            f.write(', '.join(file_tags))
+
+        file_count += 1
+
+    print('* Finish export.')
+
 def pre_click_gallery_image(evt: gr.SelectData):
     global click_gallery_image_index
     click_gallery_image_index = evt.index
@@ -373,6 +662,7 @@ def unload_models():
         del img_model
         img_model = None
     segmentation_unload_net()
+    tagging_unload()
     print('* Finish unload models.')
 
 def main_ui(platform='standalone'):
@@ -385,8 +675,10 @@ def main_ui(platform='standalone'):
 
     with gr.Blocks() as block_interface:
         with gr.Row():
+            mode_radio = gr.Radio(label='Mode', choices=['Local', 'DuckDuckGo'], value='Local', interactive=True)
+        with gr.Row() as load_datas_title:
             gr.Markdown(value='## Load Datas')
-        with gr.Row():
+        with gr.Row() as load_datas:
             with gr.Column():
                 upload_data_name = gr.Textbox(label='Data Name')
                 upload_dir_btn = gr.UploadButton(label='Upload Images Directory', file_count='directory')
@@ -400,6 +692,7 @@ def main_ui(platform='standalone'):
                 search_image = gr.Image(label='Search Image')
                 search_threshold_slider = gr.Slider(label='Search Image Threshold', value=90.0)
             with gr.Column():
+                ddg_search_keywords = gr.Textbox(label='DuckDuckGo Search Keywords', visible=False)
                 search_positive_keywords = gr.Textbox(label='Search Tags')
                 search_negative_keywords = gr.Textbox(label='Negative Tags')
                 search_gallery_func_radio = gr.Radio(label='Click on the Image', choices=['Preview', 'Exclude', 'Threshold'], value='Preview', interactive=True)
@@ -423,53 +716,116 @@ def main_ui(platform='standalone'):
         upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
 
         search_image.upload(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_image_sort,
-            inputs=[target_datas, search_image],
+            inputs=[mode_radio, target_datas, search_image],
             outputs=search_image
         ).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_image.clear(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_clear_image,
         ).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_threshold_slider.input(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_positive_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_positive_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_negative_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_negative_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, target_datas],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
+
+        ddg_search_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_ddg,
+            inputs=[mode_radio, ddg_search_keywords]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
+        ddg_search_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_ddg,
+            inputs=[mode_radio, ddg_search_keywords]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
 
         search_result_gallery.select(fn=pre_click_gallery_image, queue=False).then(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=click_gallery_image,
             inputs=[search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords],
             outputs=[search_result_gallery, search_threshold_slider, search_exclude_reset_btn],
         ).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_exclude_reset_btn.click(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=click_reset_exclude_datas,
             outputs=search_exclude_reset_btn,
         ).then(fn=search_filter,
-            inputs=[search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
-            outputs=[search_result_gallery, export_exclude_tags])
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
+            outputs=[search_result_gallery, export_exclude_tags]
+        ).then(fn=search_filter_ddg,
+            inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
+            outputs=[search_result_gallery, export_exclude_tags, search_image]
+        )
         search_gallery_func_radio.input(fn=lambda f: gr.update(allow_preview= f == 'Preview', preview=False),
             inputs=search_gallery_func_radio,
             outputs=search_result_gallery)
 
-        export_button.click(fn=export, inputs=[search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords])
+        export_button.click(fn=export, inputs=[mode_radio, search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords]
+        ).then(fn=export_ddg,
+            inputs=[mode_radio, export_dir_name, export_add_tags, export_exclude_tags]
+        )
 
         unload_button.click(fn=unload_models)
 
         def on_load():
             return target_datas_choices, 'outputs/export_train_datas/' + save_dt
         block_interface.load(fn=on_load, outputs=[target_datas, export_dir_name])
+
+        def on_change_mode_radio(mode):
+            is_local = mode == 'Local'
+            if is_local:
+                search_gallery_update = gr.update(choices=['Preview', 'Exclude', 'Threshold'])
+            else:
+                search_gallery_update = gr.update(choices=['Preview', 'Exclude'])
+            return gr.update(visible=is_local), gr.update(visible=is_local), gr.update(visible=not is_local), search_gallery_update
+        mode_radio.input(fn=on_change_mode_radio,
+            inputs=mode_radio,
+            outputs=[load_datas_title, load_datas, ddg_search_keywords, search_gallery_func_radio])
 
     return block_interface
 

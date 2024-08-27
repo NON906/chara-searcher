@@ -68,5 +68,24 @@ def calc_embedding_main(dir_path='src_images', img_model=None):
         json_dict = {'files': files_array}
         json.dump(json_dict, f)
 
+def calc_embedding_in_memory(images, img_model=None):
+    if img_model is None:
+        img_model = SentenceTransformer('clip-ViT-B-32')
+
+    embedding_array = []
+    sizes = []
+    for image in images:
+        if image.shape[2] == 4:
+            image = convert_rgba_to_rgb(image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
+        sizes.append(image.size)
+        with open(os.devnull, 'w') as f:
+            with redirect_stderr(f):
+                embedding = img_model.encode(image)
+        embedding_array.append(embedding)
+    
+    return embedding_array, sizes
+
 if __name__ == '__main__':
     calc_embedding_main()

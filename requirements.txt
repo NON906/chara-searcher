@@ -27,3 +27,5 @@ imgaug
 moviepy
 flask
 h5py
+
+duckduckgo_search

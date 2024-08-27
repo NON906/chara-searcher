@@ -159,5 +159,39 @@ def tagging_main(dir='src_images', threshold=0.35):
     interrogator.unload()
     interrogator = None
 
+def tagging_in_memory(images, threshold=0.35):
+    global args, interrogator
+    args = Args()
+    args.threshold = threshold
+    
+    ret = []
+
+    if interrogator is None:
+        interrogator = interrogators[args.model]
+        if args.cpu:
+            interrogator.use_cpu()
+
+    for image in images:
+        if image.shape[2] == 4:
+            image = convert_rgba_to_rgb(image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        im = Image.fromarray(image)
+        result = interrogator.interrogate(im)
+        tags_dict = postprocess_tags(
+            result[1],
+            threshold=args.threshold,
+            escape_tag=not args.rawtag,
+            replace_underscore=not args.rawtag,
+            exclude_tags=parse_exclude_tags())
+        tags_str = ', '.join(tags_dict.keys())
+        ret.append(tags_str)
+
+    return ret
+
+def tagging_unload():
+    if interrogator is not None:
+        interrogator.unload()
+        interrogator = None
+
 if __name__ == '__main__':
     tagging_main()
