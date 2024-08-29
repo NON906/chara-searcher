@@ -20,6 +20,8 @@ import requests
 import threading
 from urllib.parse import urlparse
 import time
+import tempfile
+import uuid
 
 from segmentation import segmentation_main, segmentation_single, segmentation_unload_net
 from tagging import tagging_main, tagging_in_memory, tagging_unload
@@ -40,6 +42,7 @@ ddg_target_urls = []
 ddg_preview_datas = []
 ddg_loading_domains = []
 ddg_loading_images = []
+temp_dir = tempfile.TemporaryDirectory()
 
 def get_unique_dir(data_name):
     src_images_dir_base = os.path.join('outputs', 'image_search_datas', data_name)
@@ -238,17 +241,21 @@ def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
     ddg_target_urls = []
 
     for ddg_result in ddg_results:
-        url = ddg_result['image']
+        url = ddg_result['thumbnail']
         if not url in ddg_datas:
             ddg_datas[url] = 'Waiting'
 
-    def loading_process(url):
-        global ddg_loading_domains, ddg_loading_images
+    def loading_process(ddg_result):
+        global ddg_loading_domains, ddg_loading_images, is_search_state
+
+        url = ddg_result['thumbnail']
 
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
-        while domain in ddg_loading_domains:
+        while domain in ddg_loading_domains or len(ddg_loading_domains) >= 4:
             time.sleep(0.01)
+            if is_search_state != 'running':
+                return False
         ddg_loading_domains.append(domain)
 
         response = requests.get(url)
@@ -263,6 +270,7 @@ def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
         ddg_loading_images.append({
             'image': image,
             'url': url,
+            'raw_url': ddg_result['image'],
         })
 
         ddg_loading_domains.remove(domain)
@@ -270,37 +278,45 @@ def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
 
     is_first_loop = True
     for ddg_result in ddg_results:
-        url = ddg_result['image']
+        url = ddg_result['thumbnail']
         ddg_target_urls.append(url)
         if ddg_datas[url] == 'Waiting':
             ddg_datas[url] = 'Loading'
             if is_first_loop:
-                is_first_loop = not loading_process(url)
+                is_first_loop = not loading_process(ddg_result)
             else:
-                thread = threading.Thread(target=loading_process, args=(url, ))
+                thread = threading.Thread(target=loading_process, args=(ddg_result, ))
                 thread.start()
 
 def loading_ddg():
-    global ddg_loading_images
+    global ddg_loading_images, is_search_state
     
     target_images = ddg_loading_images
     ddg_loading_images = []
 
     seg_images = []
     urls = []
+    raw_urls = []
     for target_data in target_images:
         image = target_data['image']
         url = target_data['url']
 
         raw_seg_images = segmentation_single(image)
+        if is_search_state != 'running':
+            return
         for seg_image in raw_seg_images:
             seg_images.append(cv2.cvtColor(seg_image, cv2.COLOR_BGRA2RGBA))
             urls.append(url)
+            raw_urls.append(target_data['raw_url'])
         del image
 
     embeddings, sizes = calc_embedding_in_memory(seg_images, img_model)
+    if is_search_state != 'running':
+        return
 
     tags = tagging_in_memory(seg_images)
+    if is_search_state != 'running':
+        return
     
     data_dict_array = []
     for loop in range(len(seg_images)):
@@ -309,10 +325,12 @@ def loading_ddg():
             'embedding': embeddings[loop],
             'size': sizes[loop],
             'tags': tags[loop],
+            'raw_url': raw_urls[loop],
+            'file_path': None,
         }
         if ddg_datas[urls[loop]] == 'Loading':
             ddg_datas[urls[loop]] = [data_dict, ]
-            print('loaded: ' + urls[loop])
+            #print('loaded: ' + urls[loop])
         else:
             ddg_datas[urls[loop]].append(data_dict)
 
@@ -343,6 +361,7 @@ def search_filter_ddg_main(threshold, positive_keywords, negative_keywords, expo
         image_embedding = None
 
     positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
+    ddg_preview_datas = []
     ret_list = []
     tags = {}
     max_tags_count = 0
@@ -388,7 +407,12 @@ def search_filter_ddg_main(threshold, positive_keywords, negative_keywords, expo
                         continue
 
                 ddg_preview_datas.append(data)
-                ret_list.append(data['image'])
+                if data['file_path'] is None:
+                    ret_image = cv2.cvtColor(data['image'], cv2.COLOR_RGBA2BGRA)
+                    ret_file_name = temp_dir.name + "/" + str(uuid.uuid4()) + ".png"
+                    cv2.imwrite(ret_file_name, ret_image)
+                    data['file_path'] = ret_file_name
+                ret_list.append(data['file_path'])
 
                 file_tags = data['tags'].split(',')
                 file_tags = [k.strip() for k in file_tags]
@@ -585,7 +609,7 @@ def export(mode, images, dir_name, add_tags, exclude_tags, positive_keywords, ne
     print('* Finish export.')
 
 def export_ddg(mode, dir_name, add_tags, exclude_tags, color=[255, 255, 255]):
-    global ddg_preview_datas
+    global ddg_preview_datas, ddg_loading_domains, exclude_datas_indexs
 
     if mode != 'DuckDuckGo':
         return
@@ -599,14 +623,71 @@ def export_ddg(mode, dir_name, add_tags, exclude_tags, color=[255, 255, 255]):
     exclude_tags = [' ('.join(k.split(' (')[:-1]) for k in exclude_tags]
 
     file_count = 0
-    for loop, data in ddg_preview_datas:
+    last_url = ''
+    seg_images = []
+    image_embeddings = None
+
+    for loop, data in enumerate(ddg_preview_datas):
         if loop in exclude_datas_indexs:
             continue
 
-        image = data['image']
-        if color is not None:
-            image = convert_rgba_to_rgb(image, color)
-        cv2.imwrite(file_count + ".png", image)
+        image_url = data['raw_url']
+
+        if last_url != image_url:
+            parsed_url = urlparse(image_url)
+            domain = parsed_url.netloc
+            while domain in ddg_loading_domains or len(ddg_loading_domains) >= 4:
+                time.sleep(0.01)
+
+            ddg_loading_domains.append(domain)
+
+            response = requests.get(image_url)
+            image = cv2.imdecode(np.frombuffer(response.content, np.uint8), -1)
+            if image is None:
+                time.sleep(0.5)
+                response = requests.get(image_url)
+                image = cv2.imdecode(np.frombuffer(response.content, np.uint8), -1)
+
+            ddg_loading_domains.remove(domain)
+
+            if image is None:
+                print('export error: ' + image_url)
+                seg_images = [data['image'], ]
+                time.sleep(0.5)
+            else:
+                seg_images = []
+                raw_seg_images = segmentation_single(image)
+                for seg_image in raw_seg_images:
+                    seg_images.append(cv2.cvtColor(seg_image, cv2.COLOR_BGRA2RGBA))
+                del image
+            
+                if len(seg_images) > 1:
+                    image_embeddings_list = []
+                    for seg_image in seg_images:
+                        if seg_image.shape[2] == 4:
+                            search_image = convert_rgba_to_rgb(seg_image)
+                        else:
+                            search_image = seg_image
+                        pil_image = Image.fromarray(search_image)
+                        image_embeddings_list.append(img_model.encode(pil_image))
+                    image_embeddings = np.stack(image_embeddings_list, 0)
+
+            last_url = image_url
+
+        if len(seg_images) > 1:
+            if hasattr(img_model, 'similarity'):
+                similarities = img_model.similarity(image_embeddings, data['embedding'])
+            else:
+                similarities = cosine_similarity(image_embeddings, np.array([data['embedding'], ]))
+            similarities = np.squeeze(similarities)
+            ret_seg_image = seg_images[similarities.argmax()]
+        elif len(seg_images) > 0:
+            ret_seg_image = seg_images[0]
+        if color is not None and ret_seg_image.shape[2] == 4:
+            ret_seg_image = convert_rgba_to_rgb(ret_seg_image, color)
+        ret_seg_image = cv2.cvtColor(ret_seg_image, cv2.COLOR_RGB2BGR)
+                    
+        cv2.imwrite(dir_name + "/" + str(file_count) + ".png", ret_seg_image)
 
         file_tags = data['tags'].split(',')
         file_tags = [k.strip() for k in file_tags]
@@ -617,7 +698,7 @@ def export_ddg(mode, dir_name, add_tags, exclude_tags, color=[255, 255, 255]):
         for tag in add_tags:
             if tag in file_tags:
                 file_tags.remove(tag)
-        txt_path = file_count + '.txt'
+        txt_path = dir_name + "/" + str(file_count) + '.txt'
         file_tags = add_tags + file_tags
         with open(txt_path, 'w') as f:
             f.write(', '.join(file_tags))
@@ -630,26 +711,35 @@ def pre_click_gallery_image(evt: gr.SelectData):
     global click_gallery_image_index
     click_gallery_image_index = evt.index
 
-def click_gallery_image(func_name, threshold, positive_keywords, negative_keywords, min_size=128):
+def click_gallery_image(mode, func_name, threshold, positive_keywords, negative_keywords, min_size=128):
     global exclude_datas_indexs, sorted_similarities_index, click_gallery_image_index, sorted_similarities
     if func_name == 'Preview':
         return gr.update(), gr.update(), gr.update()
 
-    positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
-    loop = 0
-    for _ in range(click_gallery_image_index + 1):
-        index = sorted_similarities_index[-loop - 1]
-        while not is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
-            loop += 1
+    if mode == 'Local':
+        positive_keywords, negative_keywords = keyword_parse(positive_keywords, negative_keywords)
+        loop = 0
+        for _ in range(click_gallery_image_index + 1):
             index = sorted_similarities_index[-loop - 1]
-        loop += 1
+            while not is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
+                loop += 1
+                index = sorted_similarities_index[-loop - 1]
+            loop += 1
 
-    if func_name == 'Exclude':
-        exclude_datas_indexs.append(index)
-    elif func_name == 'Threshold' and sorted_similarities is not None:
-        threshold = float(sorted_similarities[-loop]) * 100.0
-    
-    return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
+        if func_name == 'Exclude':
+            exclude_datas_indexs.append(index)
+        elif func_name == 'Threshold' and sorted_similarities is not None:
+            threshold = float(sorted_similarities[-loop]) * 100.0
+        return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
+    else:
+        exclude_num = 0
+        for loop in range(len(ddg_preview_datas)):
+            if loop in exclude_datas_indexs:
+                exclude_num += 1
+                continue
+            if func_name == 'Exclude' and loop == click_gallery_image_index + exclude_num:
+                exclude_datas_indexs.append(loop)
+        return gr.update(value=[], preview=False), threshold, 'Reset Excluded Images (' + str(len(exclude_datas_indexs)) + ')'
 
 def click_reset_exclude_datas():
     global exclude_datas_indexs
@@ -691,6 +781,7 @@ def main_ui(platform='standalone'):
             with gr.Column():
                 search_image = gr.Image(label='Search Image')
                 search_threshold_slider = gr.Slider(label='Search Image Threshold', value=90.0)
+                search_stop_btn = gr.Button(value='Stop Search')
             with gr.Column():
                 ddg_search_keywords = gr.Textbox(label='DuckDuckGo Search Keywords', visible=False)
                 search_positive_keywords = gr.Textbox(label='Search Tags')
@@ -783,7 +874,7 @@ def main_ui(platform='standalone'):
         )
 
         search_result_gallery.select(fn=pre_click_gallery_image, queue=False).then(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=click_gallery_image,
-            inputs=[search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords],
+            inputs=[mode_radio, search_gallery_func_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords],
             outputs=[search_result_gallery, search_threshold_slider, search_exclude_reset_btn],
         ).then(fn=search_filter,
             inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
@@ -803,9 +894,13 @@ def main_ui(platform='standalone'):
         )
         search_gallery_func_radio.input(fn=lambda f: gr.update(allow_preview= f == 'Preview', preview=False),
             inputs=search_gallery_func_radio,
-            outputs=search_result_gallery)
+            outputs=search_result_gallery,
+            queue=False)
 
-        export_button.click(fn=export, inputs=[mode_radio, search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords]
+        search_stop_btn.click(fn=search_cancel, queue=False)
+
+        export_button.click(fn=search_cancel, queue=False
+        ).then(fn=export, inputs=[mode_radio, search_result_gallery, export_dir_name, export_add_tags, export_exclude_tags, search_positive_keywords, search_negative_keywords]
         ).then(fn=export_ddg,
             inputs=[mode_radio, export_dir_name, export_add_tags, export_exclude_tags]
         )
