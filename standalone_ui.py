@@ -223,7 +223,7 @@ def search_filter(mode, threshold, positive_keywords, negative_keywords, export_
 
     is_search_state = 'wait'
 
-def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
+def search_ddg(mode, ddg_keywords, region='wt-wt', safesearch='off'):
     global ddg_datas, ddg_target_urls, img_model, ddg_loading_domains, ddg_loading_images
 
     if mode != 'DuckDuckGo':
@@ -242,11 +242,11 @@ def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
 
     for ddg_result in ddg_results:
         url = ddg_result['thumbnail']
-        if not url in ddg_datas:
+        if not url in ddg_datas or ddg_datas[url] == 'Error':
             ddg_datas[url] = 'Waiting'
 
     def loading_process(ddg_result):
-        global ddg_loading_domains, ddg_loading_images, is_search_state
+        global ddg_loading_domains, ddg_loading_images
 
         url = ddg_result['thumbnail']
 
@@ -254,8 +254,6 @@ def search_ddg(mode, ddg_keywords, region='jp-jp', safesearch='off'):
         domain = parsed_url.netloc
         while domain in ddg_loading_domains or len(ddg_loading_domains) >= 4:
             time.sleep(0.01)
-            if is_search_state != 'running':
-                return False
         ddg_loading_domains.append(domain)
 
         response = requests.get(url)
@@ -403,7 +401,7 @@ def search_filter_ddg_main(threshold, positive_keywords, negative_keywords, expo
                     else:
                         similarities = cosine_similarity(np.array([data['embedding'], ]), np.array([image_embedding, ]))
                     similarities = np.squeeze(similarities)
-                    if similarities[0] < threshold / 100.0:
+                    if similarities < threshold / 100.0:
                         continue
 
                 ddg_preview_datas.append(data)
@@ -476,8 +474,8 @@ def search_cancel():
 
 def search_wait():
     global is_search_state
-    #while is_search_state != 'wait':
-    #    yield
+    while is_search_state != 'wait':
+        yield
     is_search_state = 'running'
 
 def search_image_sort(mode, target_datas, image):
@@ -524,6 +522,8 @@ def search_clear_image():
     global sorted_similarities_index, sorted_similarities
     sorted_similarities_index = None
     sorted_similarities = None
+
+    return None
 
 def is_targeted_image_judge(index, positive_keywords, negative_keywords, min_size):
     global exclude_datas_indexs, embedding_file_datas
@@ -817,6 +817,7 @@ def main_ui(platform='standalone'):
             outputs=[search_result_gallery, export_exclude_tags, search_image]
         )
         search_image.clear(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_clear_image,
+            outputs=search_image
         ).then(fn=search_filter,
             inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags],
             outputs=[search_result_gallery, export_exclude_tags]
