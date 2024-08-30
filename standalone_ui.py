@@ -775,6 +775,9 @@ def main_ui(platform='standalone'):
                 upload_video_file_btn = gr.UploadButton(label='Upload Video File')
             with gr.Column():
                 target_datas = gr.Dropdown(choices=target_datas_choices, value=target_datas_choices, label='Target Datas', multiselect=True, interactive=True)
+        with gr.Row(visible=False) as ddg_settings:
+            ddg_region = gr.Textbox(label='Region', value='wt-wt')
+            ddg_safesearch = gr.Radio(label='Safe Search', choices=['on', 'moderate', 'off'], value='moderate')
         with gr.Row():
             gr.Markdown(value='## Search')
         with gr.Row():
@@ -862,13 +865,13 @@ def main_ui(platform='standalone'):
         )
 
         ddg_search_keywords.submit(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_ddg,
-            inputs=[mode_radio, ddg_search_keywords]
+            inputs=[mode_radio, ddg_search_keywords, ddg_region, ddg_safesearch]
         ).then(fn=search_filter_ddg,
             inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
             outputs=[search_result_gallery, export_exclude_tags, search_image]
         )
         ddg_search_keywords.blur(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_ddg,
-            inputs=[mode_radio, ddg_search_keywords]
+            inputs=[mode_radio, ddg_search_keywords, ddg_region, ddg_safesearch]
         ).then(fn=search_filter_ddg,
             inputs=[mode_radio, search_threshold_slider, search_positive_keywords, search_negative_keywords, export_exclude_tags, search_image],
             outputs=[search_result_gallery, export_exclude_tags, search_image]
@@ -918,10 +921,10 @@ def main_ui(platform='standalone'):
                 search_gallery_update = gr.update(choices=['Preview', 'Exclude', 'Threshold'])
             else:
                 search_gallery_update = gr.update(choices=['Preview', 'Exclude'])
-            return gr.update(visible=is_local), gr.update(visible=is_local), gr.update(visible=not is_local), search_gallery_update
+            return gr.update(visible=is_local), gr.update(visible=is_local), gr.update(visible=not is_local), gr.update(visible=not is_local), search_gallery_update
         mode_radio.input(fn=on_change_mode_radio,
             inputs=mode_radio,
-            outputs=[load_datas_title, load_datas, ddg_search_keywords, search_gallery_func_radio])
+            outputs=[load_datas_title, load_datas, ddg_settings, ddg_search_keywords, search_gallery_func_radio])
 
     return block_interface
 
