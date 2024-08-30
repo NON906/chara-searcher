@@ -8,6 +8,10 @@
 - その抽出したキャラクター画像を、画像やタグで検索できます
 - 検索結果はエクスポートでき、そのままStable DiffusionのLora学習などに使用できます
 
+NOTE:  
+[DuckDuckGo](https://duckduckgo.com/)の画像検索に対応した開発版のブランチを追加しました。  
+詳細は[こちら](https://github.com/NON906/chara-searcher/blob/duckduckgo/README_ja.md)を確認してください。  
+
 ## インストール・実行方法
 
 ### 単独で使用する

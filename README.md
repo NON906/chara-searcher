@@ -10,6 +10,10 @@ This is a repository for "character images search" from image and tags.
 - You can search the extracted character images by image or tags.
 - Search results can be exported and used as is for learning Stable Diffusion's Lora, etc.
 
+NOTE:  
+Added a development branch that supports image search on [DuckDuckGo](https://duckduckgo.com/).  
+Please check [HERE](https://github.com/NON906/chara-searcher/blob/duckduckgo/README.md).  
+
 ## How to Install and Run
 
 ### Use standalone
