@@ -9,10 +9,12 @@ from tqdm import tqdm
 import re
 import cv2
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'stable-diffusion-webui-wd14-tagger'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'tagger'))
 sys.path.append(os.path.join(os.path.dirname(__file__), 'wd14-tagger-standalone'))
 from tagger.interrogator import Interrogator
 from tagger.interrogators import interrogators
-sys.path = sys.path[:-1]
+sys.path = sys.path[:-3]
 
 from calc_embedding import convert_rgba_to_rgb
 
