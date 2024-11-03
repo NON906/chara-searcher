@@ -422,8 +422,8 @@ def main_ui(platform='standalone'):
         with gr.Row():
             unload_button = gr.Button(value='Unload Models')
 
-        upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
-        upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas])
+        upload_dir_btn.upload(fn=upload_dir_files, inputs=[upload_dir_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas], queue=False)
+        upload_video_file_btn.upload(fn=upload_video_file, inputs=[upload_video_file_btn, upload_data_name, target_datas], outputs=[upload_data_name, target_datas], queue=False)
 
         search_image.upload(fn=search_cancel, queue=False).then(fn=search_wait).then(fn=search_image_sort,
             inputs=[target_datas, search_image],
