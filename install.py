@@ -56,6 +56,8 @@ elif platform == 'standalone':
     os.chdir(os.path.dirname(__file__))
     subprocess.run(['git', 'submodule', 'update', '--init', '--recursive'])
 
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy<2'])
+
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-U', 'openmim'])
     subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmengine'])
     subprocess.run([sys.executable, '-m', 'mim', 'install', 'mmcv>=2.0.0,<2.2.0'])
