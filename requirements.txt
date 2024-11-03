@@ -3,10 +3,9 @@ sentence-transformers
 av
 
 pandas
-huggingface-hub
 Pillow
 deepdanbooru
-numpy
+numpy<2
 opencv-python
 
 einops
@@ -15,7 +14,7 @@ imgaug
 git+https://github.com/cocodataset/panopticapi.git
 pytorch-lightning
 albumentations<1.4.4
-huggingface_hub
+huggingface-hub<0.26.0
 omegaconf
 diffusers
 accelerate
