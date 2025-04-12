@@ -12,7 +12,10 @@ import cv2
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'stable-diffusion-webui-wd14-tagger'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'tagger'))
 sys.path.append(os.path.join(os.path.dirname(__file__), 'wd14-tagger-standalone'))
-from tagger.interrogator import Interrogator
+try:
+    from tagger.interrogator import Interrogator
+except:
+    pass
 from tagger.interrogators import interrogators
 sys.path = sys.path[:-3]
 
